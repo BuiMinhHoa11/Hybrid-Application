@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "submission.created",
+  "title": "SubmissionCreatedEvent",
+  "type": "object",
+  "required": ["type", "submissionId", "sessionId", "examId", "studentId", "reason", "submittedAt"],
+  "properties": {
+    "type": { "const": "submission.created" },
+    "submissionId": { "type": "string", "format": "uuid" },
+    "sessionId": { "type": "string", "format": "uuid" },
+    "examId": { "type": "string", "format": "uuid" },
+    "studentId": { "type": "string", "format": "uuid" },
+    "reason": { "enum": ["student", "timeout"] },
+    "submittedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,13 @@
+# Build context là thư mục gốc repo; BuildKit đọc tệp này thay cho .dockerignore ở gốc
+# khi build bằng Dockerfile cùng thư mục.
+**/node_modules
+**/dist
+.git
+docs
+tests
+*.md
+.env
+.env.*
+!.env.example
+**/*.log
+**/.vite

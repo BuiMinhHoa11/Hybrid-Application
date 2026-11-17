@@ -1,0 +1,21 @@
+{
+  "name": "@uniexam/grading-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@uniexam/config": "*",
+    "@uniexam/contracts": "*",
+    "@uniexam/observability": "*",
+    "express": "^4.19.2",
+    "tsx": "^4.16.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21"
+  }
+}

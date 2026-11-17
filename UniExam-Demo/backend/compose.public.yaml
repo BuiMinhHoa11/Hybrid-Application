@@ -1,0 +1,51 @@
+name: uniexam-public
+
+# Chạy trên EC2 uniexam-public (WireGuard 10.200.0.1).
+# public-api vẫn dùng PostgreSQL chung để phục vụ đăng nhập, CRUD và kết quả.
+x-env: &env
+  ENVIRONMENT: ${ENVIRONMENT:?Set ENVIRONMENT in .env}
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+  REDIS_URL: ${REDIS_URL:-redis://10.200.0.2:6379/0}
+  JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+  INTERNAL_API_KEY: ${INTERNAL_API_KEY:?Set INTERNAL_API_KEY in .env}
+  JWT_LIFETIME_HOURS: ${JWT_LIFETIME_HOURS:-8}
+  CORS_ORIGINS: ${CORS_ORIGINS:?Set CORS_ORIGINS in .env}
+  PUBLIC_API_URL: http://public-api:4000
+  PRIVATE_API_URL: ${PRIVATE_API_URL:-http://10.200.0.2:8080}
+  WORKER_URL: ${WORKER_URL:-http://10.200.0.2:8081}
+  FRONTEND_URL: http://frontend
+  GRADING_POLL_SECONDS: ${GRADING_POLL_SECONDS:-2}
+  LIFECYCLE_INTERVAL_SECONDS: ${LIFECYCLE_INTERVAL_SECONDS:-5}
+  LIFECYCLE_ENABLED: "false"
+  GRADING_QUEUE_NAME: ${GRADING_QUEUE_NAME:-uniexam:grading}
+  GRADING_QUEUE_GROUP: ${GRADING_QUEUE_GROUP:-grading-workers}
+
+x-api-build: &api-build
+  context: ..
+  dockerfile: backend/Dockerfile
+
+services:
+  public-api:
+    build: *api-build
+    environment: *env
+    command: ["sh", "-c", "python -m uniexam.cli init-db && exec uvicorn uniexam.public_app:app --host 0.0.0.0 --port 4000"]
+    ports:
+      - "127.0.0.1:${PUBLIC_API_PORT:-4000}:4000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      public-api:
+        condition: service_healthy
+    restart: unless-stopped
