@@ -70,6 +70,9 @@ services:
     init: true
     pids_limit: 100
     mem_limit: 512m
+    volumes:
+      # worker.py: sửa lỗi worker kẹt vì thời gian chờ Redis dài hơn socket_timeout.
+      - /home/ubuntu/Hybrid-Application/UniExam-Demo/backend/uniexam/worker.py:/usr/local/lib/python3.12/site-packages/uniexam/worker.py:ro
 
 networks:
   uniexam-internal:
