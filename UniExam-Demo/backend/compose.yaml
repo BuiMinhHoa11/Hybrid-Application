@@ -1,7 +1,0 @@
-# Compatibility entry point for the production stack on EC2 uniexam-public.
-# The deployment is split into:
-#   - compose.public.yaml  -> uniexam-public (10.200.0.1)
-#   - compose.private.yaml -> uniexam-private (10.200.0.2)
-# PostgreSQL and Redis remain managed by /srv/uniexam/compose.yml on uniexam-private.
-include:
-  - path: ./compose.public.yaml

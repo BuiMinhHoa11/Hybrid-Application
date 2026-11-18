@@ -1,6 +1,0 @@
-# EC2 uniexam-public: frontend + public-api.
-# Private API + grading worker run separately on uniexam-private.
-name: uniexam-public
-
-include:
-  - path: ./backend/compose.public.yaml

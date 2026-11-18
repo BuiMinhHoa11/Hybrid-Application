@@ -1,8 +1,0 @@
-{
-  "extends": "./tsconfig.base.json",
-  "include": [
-    "backend/scripts/**/*.ts",
-    "database/node/scripts/**/*.ts",
-    "tests/**/*.ts"
-  ]
-}
