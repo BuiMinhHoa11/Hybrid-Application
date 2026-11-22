@@ -4,7 +4,7 @@ import { questionApi } from '../../entities/question/api';
 import type { Question, QuestionInput } from '../../entities/question/types';
 import { QuestionForm } from '../question-editor';
 import { difficultyLabel, formatScore, useAsync } from '../../shared/lib';
-import { Alert, Badge, Button, ErrorAlert, Field, Pagination, Spinner } from '../../shared/ui';
+import { Alert, Badge, Button, ErrorAlert, Field, Pagination, QuestionImage, Spinner } from '../../shared/ui';
 
 /** Di chuyển phần tử trong mảng, không đổi mảng gốc. */
 export function moveItem<T>(items: T[], from: number, to: number): T[] {
@@ -32,7 +32,7 @@ export function PaperBuilder({ onSaved, onCancel }: { onSaved: () => void; onCan
   const [autoOpen, setAutoOpen] = useState(false);
   const [autoRules, setAutoRules] = useState<PaperAutoRule[]>([{ chapter: '', topic: '', difficulty: '', count: 5 }]);
 
-  const filters = useAsync(() => questionApi.filters(), []);
+  const filters = useAsync(() => questionApi.filters(), [], 'questions:filters');
   const bank = useAsync(() => questionApi.list({ q, subject: pickSubject, page, pageSize: 8 }), [q, pickSubject, page]);
 
   const isSelected = (id: string) => selected.some((s) => s.id === id);
@@ -175,6 +175,7 @@ export function PaperBuilder({ onSaved, onCancel }: { onSaved: () => void; onCan
                   <input type="checkbox" checked={isSelected(item.id)} onChange={() => toggle(item)} />
                   <span>
                     {item.content.length > 100 ? `${item.content.slice(0, 100)}…` : item.content}
+                    <QuestionImage src={item.imageDataUrl} thumbnail />
                     <div className="muted small">
                       {item.subject} · {item.type === 'fill_blank' ? 'Điền vào chỗ trống' : 'Trắc nghiệm'} · {item.chapter || '—'} · {difficultyLabel[item.difficulty]} · {formatScore(item.points)} điểm
                     </div>
@@ -197,7 +198,7 @@ export function PaperBuilder({ onSaved, onCancel }: { onSaved: () => void; onCan
             selected.map((s, i) => (
               <div key={s.id} className="row" style={{ flexWrap: 'nowrap', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                 <strong style={{ width: 26 }}>{i + 1}.</strong>
-                <span className="grow small">{s.content.length > 70 ? `${s.content.slice(0, 70)}…` : s.content}</span>
+                <span className="grow small">{s.content.length > 70 ? `${s.content.slice(0, 70)}…` : s.content}<QuestionImage src={s.imageDataUrl} thumbnail /></span>
                 <Badge>{formatScore(s.points)}đ</Badge>
                 <Button small disabled={i === 0} onClick={() => setSelected((p) => moveItem(p, i, i - 1))} aria-label="Lên">↑</Button>
                 <Button small disabled={i === selected.length - 1} onClick={() => setSelected((p) => moveItem(p, i, i + 1))} aria-label="Xuống">↓</Button>

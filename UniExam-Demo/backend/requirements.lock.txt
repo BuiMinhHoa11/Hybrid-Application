@@ -16,6 +16,8 @@ argon2-cffi==25.1.0
     # via uniexam-python
 argon2-cffi-bindings==26.2.0
     # via argon2-cffi
+async-timeout==5.0.1 ; python_full_version < '3.11.3'
+    # via redis
 bcrypt==5.0.0
     # via uniexam-python
 certifi==2026.10.23
@@ -53,6 +55,8 @@ markupsafe==3.0.4
     # via mako
 opentelemetry-api==1.45.2
     # via fastapi
+pillow==13.0.0
+    # via uniexam-python
 psycopg==3.3.9
     # via uniexam-python
 psycopg-binary==3.3.9 ; implementation_name != 'pypy'
@@ -75,6 +79,8 @@ python-dotenv==1.2.4
     #   uvicorn
 pyyaml==6.0.3
     # via uvicorn
+redis==6.4.0
+    # via uniexam-python
 sqlalchemy==2.1.8
     # via
     #   alembic
@@ -101,8 +107,6 @@ typing-inspection==0.4.5
     #   pydantic-settings
 tzdata==2026.6 ; sys_platform == 'win32'
     # via psycopg
-redis==6.4.0
-# via uniexam-python
 uvicorn==0.54.0
     # via uniexam-python
 uvloop==0.23.0 ; platform_python_implementation != 'PyPy' and sys_platform != 'cygwin' and sys_platform != 'win32'

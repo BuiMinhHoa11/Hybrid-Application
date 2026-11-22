@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from uniexam.common import Schema, dto, now_utc
 from uniexam.db import get_db, one, many, run
 from uniexam.errors import AppError
+from uniexam.notifications import queue_schedule_emails
 from uniexam.security import teacher_user, student_user, require_owned
 from uniexam.routers.questions import scoped_owner
 
@@ -232,7 +233,8 @@ def publish_exam(exam_id: UUID, db: Session = Depends(get_db, scope="function"),
     issues = validation_issues(db, exam)
     if issues:
         raise AppError(422, "Kỳ thi chưa đủ điều kiện phát hành", "UNPROCESSABLE", issues)
-    return exam_dto(one(db, "UPDATE exams SET status='published' WHERE id=:id RETURNING *", id=exam_id))
+    published = one(db, "UPDATE exams SET status='published' WHERE id=:id RETURNING *", id=exam_id)
+    return {**exam_dto(published), "emailNotifications": queue_schedule_emails(db, published)}
 
 
 def student_exam_dto(row, with_description=False):

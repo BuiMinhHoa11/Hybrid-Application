@@ -15,13 +15,14 @@ type Editing = { mode: 'new' } | { mode: 'edit'; exam: TeacherExam; audience: Au
 export default function ExamsPage() {
   const [status, setStatus] = useState<ExamStatus | ''>('');
   const [page, setPage] = useState(1);
-  const list = useAsync(() => teacherExamApi.list({ status, page, pageSize: 15 }), [status, page]);
+  const list = useAsync(() => teacherExamApi.list({ status, page, pageSize: 15 }), [status, page], 'teacher-exams:list');
   const [editing, setEditing] = useState<Editing | null>(null);
   const [opening, setOpening] = useState(false);
   const [openError, setOpenError] = useState<string>();
   const [deleting, setDeleting] = useState<TeacherExam | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<unknown>();
+  const [notice, setNotice] = useState<string>();
 
   const open = async (exam: TeacherExam) => {
     setOpening(true);
@@ -59,6 +60,7 @@ export default function ExamsPage() {
         </Button>
       </PageHeader>
       {openError && <Alert>{openError}</Alert>}
+      {notice && <Alert kind="success">{notice}</Alert>}
       <Card>
         <div className="filters">
           <select value={status} onChange={(e) => { setStatus(e.target.value as ExamStatus | ''); setPage(1); }} aria-label="Lọc theo trạng thái">
@@ -129,7 +131,10 @@ export default function ExamsPage() {
           <ExamForm
             exam={editing.mode === 'edit' ? editing.exam : undefined}
             audience={editing.mode === 'edit' ? editing.audience : undefined}
-            onChanged={list.reload}
+            onChanged={(message) => {
+              list.reload();
+              if (message) setNotice(message);
+            }}
             onClose={() => setEditing(null)}
           />
         </Modal>

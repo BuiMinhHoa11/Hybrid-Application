@@ -19,14 +19,14 @@ def migrate():
     command.upgrade(config, "head")
 
 
-def add_user(db, username, name, role, password):
+def add_user(db, username, name, role, password, email=None):
     existing = one(db, "SELECT id, role FROM users WHERE lower(username)=lower(:u)", u=username)
     if existing:
         if existing["role"] != role:
             raise ValueError(f"Tài khoản {username} đã tồn tại với vai trò khác; seed không tự đổi quyền")
         return existing["id"]
-    return one(db, """INSERT INTO users(username,full_name,role,password_hash)
-      VALUES (:u,:n,:r,:p) RETURNING id""", u=username, n=name, r=role, p=hash_password(password))["id"]
+    return one(db, """INSERT INTO users(username,full_name,email,role,password_hash)
+      VALUES (:u,:n,:e,:r,:p) RETURNING id""", u=username, n=name, e=email, r=role, p=hash_password(password))["id"]
 
 
 def seed_demo():
@@ -35,7 +35,7 @@ def seed_demo():
     with SessionLocal.begin() as db:
         add_user(db, "admin", "Quản trị viên", "admin", "admin")
         teacher = add_user(db, "gv01", "Giáo viên demo", "teacher", "12345")
-        students = [add_user(db, f"sv00{i}", f"Sinh viên {i}", "student", "12345") for i in (1, 2)]
+        students = [add_user(db, f"sv00{i}", f"Sinh viên {i}", "student", "12345", f"sv00{i}@example.com") for i in (1, 2)]
         existing = one(db, "SELECT id FROM exam_papers WHERE owner_id=:owner AND title='Đề demo Python'", owner=teacher)
         if not existing:
             paper = one(db, "INSERT INTO exam_papers(owner_id,title,subject) VALUES (:owner,'Đề demo Python','Tổng hợp') RETURNING id", owner=teacher)["id"]
@@ -46,8 +46,8 @@ def seed_demo():
                 q = one(db, """INSERT INTO questions(owner_id,subject,difficulty,type,content,options,correct_option_ids,accepted_answers,points)
                   VALUES (:owner,'Tổng hợp','easy',:type,:content,CAST(:options AS jsonb),:correct,:accepted,1) RETURNING id""",
                   owner=teacher, type=kind, content=content, options=dump_json(options), correct=correct, accepted=accepted)["id"]
-                run(db, """INSERT INTO exam_paper_questions(paper_id,question_id,position,type,content,options,correct_option_ids,accepted_answers,points,difficulty)
-                  SELECT :paper,id,:position,type,content,options,correct_option_ids,accepted_answers,points,difficulty FROM questions WHERE id=:q""",
+                run(db, """INSERT INTO exam_paper_questions(paper_id,question_id,position,type,content,image_data_url,options,correct_option_ids,accepted_answers,points,difficulty)
+                  SELECT :paper,id,:position,type,content,image_data_url,options,correct_option_ids,accepted_answers,points,difficulty FROM questions WHERE id=:q""",
                   paper=paper, position=position, q=q)
             start = now_utc() + timedelta(minutes=10)
             exam = one(db, """INSERT INTO exams(owner_id,paper_id,title,subject,start_time,end_time,duration_minutes,question_count)
@@ -67,7 +67,7 @@ def main():
             stream.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="UniExam Python administration")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("init-db", help="Apply Alembic migrations to a NEW Python database")
+    commands.add_parser("init-db", help="Apply pending Alembic migrations (creates tables on a new database)")
     admin = commands.add_parser("create-admin")
     admin.add_argument("username")
     admin.add_argument("--name", default="Quản trị viên")
@@ -78,7 +78,24 @@ def main():
     legacy.add_argument("--user-conflicts", choices=["error", "reuse-target"], default="error")
     legacy.add_argument("--apply", action="store_true", help="Commit the import after reviewing a successful dry-run")
     commands.add_parser("seed-demo")
+    test_mail = commands.add_parser("send-test-email", help="Send one test email with the current SMTP settings")
+    test_mail.add_argument("to")
     args = parser.parse_args()
+    if args.command == "send-test-email":
+        from email.message import EmailMessage
+        from .notifications import smtp_connect
+        message = EmailMessage()
+        message["Subject"] = "[UniExam] Email thử"
+        message["From"] = settings.mail_from
+        message["To"] = args.to
+        message.set_content("Cấu hình SMTP của UniExam hoạt động. Sinh viên sẽ nhận lịch thi qua địa chỉ email này.")
+        client = smtp_connect()
+        try:
+            client.send_message(message)
+        finally:
+            client.quit()
+        print(f"Đã gửi email thử tới {args.to}. Bật EMAIL_ENABLED=true để gửi lịch thi tự động.")
+        return
     if args.command == "init-db":
         migrate()
         print("Đã áp migration.")

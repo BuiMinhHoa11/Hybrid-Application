@@ -6,7 +6,13 @@ import { useAuth } from '../../../shared/auth';
 import { formatDateTime, roleLabel, useAsync } from '../../../shared/lib';
 import { Alert, Badge, Button, Card, ConfirmDialog, ErrorAlert, Field, Modal, PageHeader, Pagination, Spinner } from '../../../shared/ui';
 
-type Dialog = { kind: 'create' } | { kind: 'view'; user: User } | { kind: 'edit'; user: User } | { kind: 'toggle'; user: User } | null;
+type Dialog =
+  | { kind: 'create' }
+  | { kind: 'view'; user: User }
+  | { kind: 'edit'; user: User }
+  | { kind: 'toggle'; user: User }
+  | { kind: 'delete'; user: User }
+  | null;
 
 /** UC03A: trang "Quản lý tài khoản". */
 export default function AccountsPage() {
@@ -17,7 +23,7 @@ export default function AccountsPage() {
   const [page, setPage] = useState(1);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [notice, setNotice] = useState<string>();
-  const list = useAsync(() => adminUserApi.list({ q, role, active, page, pageSize: 15 }), [q, role, active, page]);
+  const list = useAsync(() => adminUserApi.list({ q, role, active, page, pageSize: 15 }), [q, role, active, page], 'admin-users:list');
 
   const done = (message: string) => {
     setDialog(null);
@@ -77,6 +83,9 @@ export default function AccountsPage() {
                         <Button small variant={u.isActive ? 'danger' : 'default'} disabled={u.id === me?.id} title={u.id === me?.id ? 'Không thể tự khóa tài khoản của mình' : undefined} onClick={() => setDialog({ kind: 'toggle', user: u })}>
                           {u.isActive ? 'Khóa' : 'Mở khóa'}
                         </Button>
+                        <Button small variant="danger" disabled={u.id === me?.id} title={u.id === me?.id ? 'Không thể tự xóa tài khoản của mình' : undefined} onClick={() => setDialog({ kind: 'delete', user: u })}>
+                          Xóa
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -94,6 +103,7 @@ export default function AccountsPage() {
         <EditDialog user={dialog.user} isSelf={dialog.user.id === me?.id} onClose={() => setDialog(null)} onSaved={() => done('Đã cập nhật tài khoản.')} />
       )}
       {dialog?.kind === 'toggle' && <ToggleDialog user={dialog.user} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog?.kind === 'delete' && <DeleteDialog user={dialog.user} onClose={() => setDialog(null)} onDone={done} />}
     </>
   );
 }
@@ -109,7 +119,8 @@ function CreateDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () =
   const usernameError = username && !/^[a-zA-Z0-9._-]{3,50}$/.test(username)
     ? 'Dùng 3–50 ký tự: chữ không dấu, số, dấu chấm, gạch dưới hoặc gạch ngang.' : undefined;
   const passwordError = password && password.length < 8 ? 'Mật khẩu phải có ít nhất 8 ký tự.' : undefined;
-  const canSave = !!username && !usernameError && !!fullName.trim() && password.length >= 8;
+  const emailRequired = role === 'student';
+  const canSave = !!username && !usernameError && !!fullName.trim() && password.length >= 8 && (!emailRequired || !!email.trim());
 
   const save = async () => {
     if (!canSave) return;
@@ -136,7 +147,10 @@ function CreateDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () =
           <span className="muted small">Giáo viên dùng mã này để chỉ định sinh viên vào kỳ thi.</span>
         </Field>
         <Field label="Họ tên"><input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} maxLength={200} /></Field>
-        <Field label="Email (không bắt buộc)"><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Field>
+        <Field label={emailRequired ? 'Email (bắt buộc với sinh viên)' : 'Email (không bắt buộc)'}>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required={emailRequired} placeholder={emailRequired ? 'vd: sinhvien@gmail.com' : undefined} />
+          {emailRequired && <span className="muted small">Sinh viên nhận thông báo lịch thi qua email này.</span>}
+        </Field>
         <Field label="Vai trò"><select value={role} onChange={(e) => setRole(e.target.value as Role)}>
           {ROLES.map((r) => <option key={r} value={r}>{roleLabel[r]}</option>)}
         </select></Field>
@@ -192,9 +206,11 @@ function EditDialog({ user, isSelf, onClose, onSaved }: { user: User; isSelf: bo
   const [error, setError] = useState<unknown>();
 
   const passwordError = password && password.length < 8 ? 'Mật khẩu phải có ít nhất 8 ký tự.' : undefined;
+  const emailRequired = role === 'student';
+  const emailMissing = emailRequired && !email.trim();
 
   const save = async () => {
-    if (passwordError) return;
+    if (passwordError || emailMissing) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -218,7 +234,7 @@ function EditDialog({ user, isSelf, onClose, onSaved }: { user: User; isSelf: bo
       footer={
         <>
           <Button onClick={onClose} disabled={busy}>Hủy</Button>
-          <Button variant="primary" onClick={save} disabled={busy || !fullName.trim() || !!passwordError}>{busy ? 'Đang lưu...' : 'Lưu'}</Button>
+          <Button variant="primary" onClick={save} disabled={busy || !fullName.trim() || !!passwordError || emailMissing}>{busy ? 'Đang lưu...' : 'Lưu'}</Button>
         </>
       }
     >
@@ -227,8 +243,8 @@ function EditDialog({ user, isSelf, onClose, onSaved }: { user: User; isSelf: bo
         <Field label="Họ tên">
           <input type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} />
         </Field>
-        <Field label="Email">
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <Field label={emailRequired ? 'Email (bắt buộc với sinh viên)' : 'Email'} error={emailMissing ? 'Tài khoản sinh viên phải có email để nhận lịch thi.' : undefined}>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required={emailRequired} />
         </Field>
         <Field label="Vai trò">
           <select value={role} onChange={(e) => setRole(e.target.value as Role)} disabled={isSelf}>
@@ -241,6 +257,44 @@ function EditDialog({ user, isSelf, onClose, onSaved }: { user: User; isSelf: bo
         </Field>
       </div>
     </Modal>
+  );
+}
+
+function DeleteDialog({ user, onClose, onDone }: { user: User; onClose: () => void; onDone: (message: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>();
+
+  const confirm = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await adminUserApi.remove(user.id);
+      onDone(`Đã xóa tài khoản ${user.username}.`);
+    } catch (err) {
+      setError(err);
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ConfirmDialog
+      title="Xóa tài khoản"
+      danger
+      confirmLabel="Xóa vĩnh viễn"
+      busy={busy}
+      error={error}
+      onConfirm={confirm}
+      onCancel={onClose}
+      message={
+        <>
+          Xóa vĩnh viễn tài khoản <strong>{user.username}</strong> ({user.fullName})? Thao tác này không hoàn tác được.
+          <br />
+          <span className="muted small">
+            Sinh viên chưa làm bài sẽ được gỡ khỏi các danh sách dự thi. Không xóa được tài khoản đã có bài làm, câu hỏi, đề hoặc kỳ thi; với các tài khoản đó hãy dùng Khóa.
+          </span>
+        </>
+      }
+    />
   );
 }
 

@@ -5,7 +5,7 @@ import { questionApi } from '../../../entities/question/api';
 import type { Question, QuestionInput } from '../../../entities/question/types';
 import { QuestionForm } from '../../../features/question-editor';
 import { difficultyLabel, formatScore, useAsync } from '../../../shared/lib';
-import { Badge, Button, Card, ConfirmDialog, ErrorAlert, Modal, PageHeader, Pagination, Spinner } from '../../../shared/ui';
+import { Badge, Button, Card, ConfirmDialog, ErrorAlert, Modal, PageHeader, Pagination, QuestionImage, Spinner } from '../../../shared/ui';
 
 const PAGE_SIZE = 15;
 
@@ -22,10 +22,11 @@ export default function QuestionBankPage() {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<unknown>();
 
-  const filters = useAsync(() => questionApi.filters(), []);
+  const filters = useAsync(() => questionApi.filters(), [], 'questions:filters');
   const list = useAsync(
     () => questionApi.list({ q, subject, chapter, topic, difficulty, page, pageSize: PAGE_SIZE }),
-    [q, subject, chapter, topic, difficulty, page]
+    [q, subject, chapter, topic, difficulty, page],
+    'questions:list'
   );
 
   const change = <T,>(setter: (v: T) => void) => (v: T) => {
@@ -111,6 +112,7 @@ export default function QuestionBankPage() {
                     <tr key={item.id}>
                       <td style={{ maxWidth: 380 }}>
                         {item.content.length > 120 ? `${item.content.slice(0, 120)}…` : item.content}
+                        <QuestionImage src={item.imageDataUrl} thumbnail />
                         <div className="muted small">{item.type === 'fill_blank' ? 'Điền vào chỗ trống' : 'Trắc nghiệm'}</div>
                       </td>
                       <td>{item.subject}</td>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { studentExamApi } from '../../../entities/exam/api';
 import { sessionApi } from '../../../entities/submission/api';
+import { enterExamFullscreen } from '../../../features/exam-taking/fullscreen';
 import { formatCountdown, formatDateTime, formatDuration, useAsync, useNow } from '../../../shared/lib';
 import { Alert, Badge, Button, Card, ErrorAlert, PageHeader, Spinner } from '../../../shared/ui';
 import { examStateBadge } from '../exam-list';
@@ -10,7 +11,7 @@ import { examStateBadge } from '../exam-list';
 export default function ExamDetailPage() {
   const { id = '' } = useParams();
   const navigate = useNavigate();
-  const { data, error, loading, reload } = useAsync(() => studentExamApi.detail(id), [id]);
+  const { data, error, loading, reload } = useAsync(() => studentExamApi.detail(id), [id], 'student-exams:detail');
   const offset = useMemo(() => (data ? Date.parse(data.serverTime) - Date.now() : 0), [data]);
   const now = useNow(offset);
   const [starting, setStarting] = useState(false);
@@ -46,10 +47,13 @@ export default function ExamDetailPage() {
   const start = async () => {
     setStarting(true);
     setStartError(undefined);
+    const alreadyFullscreen = !!document.fullscreenElement;
     try {
+      await enterExamFullscreen();
       const res = await sessionApi.start(exam.id);
       navigate(`/student/exam-room/${res.session.id}`);
     } catch (err) {
+      if (!alreadyFullscreen && document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
       setStartError(err);
       setStarting(false);
       reload();
@@ -76,6 +80,7 @@ export default function ExamDetailPage() {
       <Card>
         <div className="stack">
           <ErrorAlert error={startError} />
+          {!submitted && <Alert kind="info">Bài thi yêu cầu toàn màn hình. Mỗi lần thoát toàn màn hình trong thời gian làm bài sẽ được ghi vào nhật ký để giáo viên xem lại. Thời gian thi vẫn tiếp tục chạy.</Alert>}
           {submitted ? (
             <>
               <Alert kind="success">Bạn đã nộp bài của kỳ thi này.</Alert>

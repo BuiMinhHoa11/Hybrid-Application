@@ -1,10 +1,10 @@
 """Student attempts, safe paper delivery, autosave and immutable submissions."""
 from datetime import timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Response
-from pydantic import Field, model_validator
+from pydantic import AwareDatetime, Field, model_validator
 from sqlalchemy.orm import Session
 
 from uniexam.common import Schema, dto, dump_json, now_utc
@@ -20,6 +20,12 @@ Student = Annotated[dict, Depends(student_user, scope="function")]
 
 class StartSession(Schema):
     exam_id: UUID
+
+
+class FullscreenEvent(Schema):
+    id: UUID
+    type: Literal["fullscreen_enter", "fullscreen_exit"]
+    client_time: AwareDatetime
 
 
 class AnswerPatch(Schema):
@@ -138,7 +144,7 @@ def get_session(session_id: UUID, db: DB, user: Student):
     if session["status"] != "in_progress":
         return payload
     # Explicit safe-column projection. Accepted answers and correct option IDs never leave this query.
-    questions = many(db, """SELECT id, type, position, content, options, points,
+    questions = many(db, """SELECT id, type, position, content, image_data_url, options, points,
         type = 'multiple_choice' AND cardinality(correct_option_ids) > 1 AS allow_multiple
         FROM exam_paper_questions WHERE paper_id = :id ORDER BY position""", id=session["paper_id"])
     for question in questions:
@@ -207,3 +213,31 @@ def submit_session(session_id: UUID, db: DB, user: Student):
     session = owned_session(db, session_id, user)
     reason = "timeout" if session["expires_at"] <= now_utc() else "student"
     return finalize_session(db, session_id, reason)
+
+
+@router.post("/exam-sessions/{session_id}/events", status_code=201)
+def record_fullscreen_event(session_id: UUID, body: FullscreenEvent, db: DB, user: Student, response: Response):
+    session = owned_session(db, session_id, user, "SHARE")
+    existing = one(db, "SELECT * FROM exam_session_events WHERE id=:id", id=body.id)
+    if existing:
+        if existing["session_id"] != session_id or existing["type"] != body.type or existing["client_time"] != body.client_time:
+            raise AppError(409, "Mã sự kiện đã được sử dụng", "EVENT_CONFLICT")
+        response.status_code = 200
+        return dto(existing)
+    now = now_utc()
+    ended = min(session["expires_at"], session["submitted_at"] or session["expires_at"])
+    # Client time is an observation, never the authoritative submission clock.
+    # Permit delayed delivery after reconnecting without counting intentional exit after submission.
+    if (body.client_time < session["started_at"] - timedelta(seconds=5)
+            or body.client_time >= ended or body.client_time > now + timedelta(seconds=30)
+            or now > ended + timedelta(minutes=10)):
+        raise AppError(422, "Sự kiện nằm ngoài thời gian làm bài", "EVENT_OUTSIDE_SESSION")
+    saved = one(db, """INSERT INTO exam_session_events(id,session_id,type,client_time)
+        VALUES (:id,:session,:type,:time) ON CONFLICT(id) DO NOTHING RETURNING *""",
+        id=body.id, session=session_id, type=body.type, time=body.client_time)
+    if not saved:
+        saved = one(db, "SELECT * FROM exam_session_events WHERE id=:id", id=body.id)
+        if saved["session_id"] != session_id or saved["type"] != body.type or saved["client_time"] != body.client_time:
+            raise AppError(409, "Mã sự kiện đã được sử dụng", "EVENT_CONFLICT")
+        response.status_code = 200
+    return dto(saved)

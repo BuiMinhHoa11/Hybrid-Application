@@ -1,6 +1,7 @@
 """Teacher result management and publication-gated student reviews."""
 
 from decimal import Decimal
+from statistics import median
 from typing import Any, Literal
 from uuid import UUID
 
@@ -75,6 +76,7 @@ def build_review(db: Session, exam: dict[str, Any], header: dict[str, Any], reve
             "type": question["type"],
             "position": question["position"],
             "content": question["content"],
+            "image_data_url": question["image_data_url"],
             "options": question["options"],
             "points": question["points"],
             "selected_option_ids": selected,
@@ -130,7 +132,8 @@ def exam_results(exam_id: UUID, db: Session = Depends(get_db, scope="function"),
     rows = many(
         db,
         """SELECT u.id AS student_id, u.username, u.full_name,
-          ss.status AS session_status, ss.started_at, sub.id AS submission_id,
+          ss.id AS session_id, ss.status AS session_status, ss.started_at, sub.id AS submission_id,
+          (SELECT count(*)::int FROM exam_session_events ev WHERE ev.session_id=ss.id AND ev.type='fullscreen_exit') AS fullscreen_exit_count,
           sub.status AS submission_status, sub.submitted_at, ss.submit_reason, gr.score, gr.max_score
           FROM exam_audience a JOIN users u ON u.id = a.student_id
           LEFT JOIN exam_sessions ss ON ss.exam_id = a.exam_id AND ss.student_id = a.student_id
@@ -139,8 +142,9 @@ def exam_results(exam_id: UUID, db: Session = Depends(get_db, scope="function"),
           WHERE a.exam_id = :exam_id ORDER BY u.username""",
         exam_id=exam_id,
     )
-    graded = [row for row in rows if row["submission_status"] == "graded" and row["score"] is not None and row["max_score"] is not None]
-    average = round(sum((row["score"] for row in graded), Decimal(0)) / len(graded), 2) if graded else None
+    graded = [row for row in rows if row["submission_status"] == "graded" and row["score"] is not None and row["max_score"] is not None and row["max_score"] > 0]
+    scores = [row["score"] for row in graded]
+    average = round(sum(scores, Decimal(0)) / len(scores), 2) if scores else None
     return dto({
         "exam": exam,
         "rows": rows,
@@ -148,6 +152,9 @@ def exam_results(exam_id: UUID, db: Session = Depends(get_db, scope="function"),
         "stats": {
             "audience": len(rows), "started": sum(row["session_status"] is not None for row in rows),
             "submitted": sum(row["submission_id"] is not None for row in rows), "graded": len(graded), "average_score": average,
+            "median_score": round(median(scores), 2) if scores else None,
+            "min_score": round(min(scores), 2) if scores else None,
+            "max_score": round(max(scores), 2) if scores else None,
         },
     })
 
@@ -159,6 +166,20 @@ def submission_review(exam_id: UUID, submission_id: UUID, db: Session = Depends(
     if not header or not exam["paper_id"]:
         raise AppError(404, "Không tìm thấy bài nộp", "NOT_FOUND")
     return dto(build_review(db, exam, header, True))
+
+
+@router.get("/teacher/exam-results/{exam_id}/sessions/{session_id}/events")
+def session_events(exam_id: UUID, session_id: UUID, db: Session = Depends(get_db, scope="function"), user: dict = Depends(teacher_user, scope="function")):
+    owned_exam(db, exam_id, user)
+    session = one(db, "SELECT id FROM exam_sessions WHERE id=:session AND exam_id=:exam", session=session_id, exam=exam_id)
+    if not session:
+        raise AppError(404, "Không tìm thấy phiên thi", "NOT_FOUND")
+    items = many(db, """SELECT id,type,client_time,received_at FROM exam_session_events
+        WHERE session_id=:id ORDER BY client_time,received_at,id LIMIT 1000""", id=session_id)
+    counts = one(db, """SELECT count(*)::int AS total,
+        count(*) FILTER (WHERE type='fullscreen_exit')::int AS fullscreen_exit_count
+        FROM exam_session_events WHERE session_id=:id""", id=session_id)
+    return dto({"items": items, **counts})
 
 
 @router.post("/teacher/exam-results/{exam_id}/publish")

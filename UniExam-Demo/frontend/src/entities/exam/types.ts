@@ -36,6 +36,13 @@ export interface TeacherExam {
   paperTitle?: string | null;
 }
 
+/** Kết quả xếp email lịch thi khi phát hành (enabled=false: server chưa bật gửi email). */
+export interface EmailNotificationSummary {
+  enabled: boolean;
+  queued: number;
+  missingEmail: number;
+}
+
 export interface AudienceMember {
   id: string;
   username: string;
@@ -76,6 +83,7 @@ export interface PaperQuestion {
   type: string;
   position: number;
   content: string;
+  imageDataUrl?: string | null;
   options: Array<{ id: string; text: string }>;
   correctOptionIds: string[];
   points: number;

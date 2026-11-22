@@ -20,6 +20,28 @@ interface RequestOptions {
   body?: unknown;
   query?: Query;
   signal?: AbortSignal;
+  keepalive?: boolean;
+}
+
+/**
+ * Tín hiệu hủy "ngầm" cho các request GET được gọi bên trong withAbortSignal().
+ * useAsync dùng nó để hủy request khi người dùng rời trang, mà không phải sửa từng hàm API.
+ */
+let ambientSignal: AbortSignal | undefined;
+
+/** Chạy fn; mọi request GET mà fn gọi ngay (đồng bộ) sẽ bị hủy khi signal bị abort. */
+export function withAbortSignal<T>(signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  const previous = ambientSignal;
+  ambientSignal = signal;
+  try {
+    return fn();
+  } finally {
+    ambientSignal = previous;
+  }
+}
+
+export function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError';
 }
 
 function buildUrl(base: string, path: string, query?: Query): string {
@@ -39,6 +61,8 @@ function buildUrl(base: string, path: string, query?: Query): string {
  */
 export function createClient(basePath: string) {
   async function request<T>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
+    // Chỉ GET mới nhận tín hiệu hủy ngầm: hủy một request ghi dữ liệu giữa chừng là không an toàn.
+    const signal = opts.signal ?? (method === 'GET' ? ambientSignal : undefined);
     const headers: Record<string, string> = { Accept: 'application/json' };
     const token = tokenStore.get();
     if (token) headers.Authorization = `Bearer ${token}`;
@@ -50,7 +74,8 @@ export function createClient(basePath: string) {
         method,
         headers,
         body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
-        signal: opts.signal
+        signal,
+        keepalive: opts.keepalive
       });
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') throw err;
@@ -79,7 +104,7 @@ export function createClient(basePath: string) {
 
   return {
     get: <T>(path: string, query?: Query, signal?: AbortSignal) => request<T>('GET', path, { query, signal }),
-    post: <T>(path: string, body?: unknown) => request<T>('POST', path, { body: body ?? {} }),
+    post: <T>(path: string, body?: unknown, options?: Pick<RequestOptions, 'keepalive' | 'signal'>) => request<T>('POST', path, { ...options, body: body ?? {} }),
     put: <T>(path: string, body?: unknown) => request<T>('PUT', path, { body: body ?? {} }),
     delete: <T>(path: string) => request<T>('DELETE', path)
   };

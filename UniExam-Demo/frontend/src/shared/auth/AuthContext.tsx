@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { authApi } from '../../entities/user/api';
 import type { SessionUser } from '../../entities/user/types';
 import { AUTH_EXPIRED_EVENT } from '../api';
-import { tokenStore } from './token';
+import { clearAsyncCache } from '../lib/useAsync';
+import { AUTH_STORAGE_KEY, tokenStore } from './token';
 
 interface AuthState {
   user: SessionUser | null;
@@ -19,15 +20,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState<boolean>(() => tokenStore.get() !== null);
 
   useEffect(() => {
-    if (!tokenStore.get()) return;
     let cancelled = false;
-    authApi
-      .me()
-      .then((me) => !cancelled && setUser({ id: me.id, username: me.username, fullName: me.fullName, role: me.role }))
-      .catch(() => tokenStore.clear())
-      .finally(() => !cancelled && setLoading(false));
+    let generation = 0;
+    const restore = async () => {
+      const request = ++generation;
+      const token = tokenStore.get();
+      setUser(null);
+      setLoading(!!token);
+      if (!token) return;
+      const current = () => !cancelled && request === generation && tokenStore.get() === token;
+      try {
+        const me = await authApi.me();
+        if (current()) setUser({ id: me.id, username: me.username, fullName: me.fullName, role: me.role });
+      } catch {
+        if (current()) tokenStore.clear();
+      } finally {
+        if (!cancelled && request === generation) setLoading(false);
+      }
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== AUTH_STORAGE_KEY && event.key !== null) return;
+      tokenStore.sync(event.key === null ? null : event.newValue);
+      void restore();
+    };
+    void restore();
+    window.addEventListener('storage', onStorage);
     return () => {
       cancelled = true;
+      window.removeEventListener('storage', onStorage);
     };
   }, []);
 
@@ -46,6 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     tokenStore.clear();
+    clearAsyncCache();
     setUser(null);
   }, []);
 

@@ -26,7 +26,15 @@
     "dev:node:public-api": "npm run dev -w @uniexam/public-api",
     "dev:node:private-api": "npm run dev -w @uniexam/private-api",
     "dev:node:grading-worker": "npm run dev -w @uniexam/grading-worker",
-    "dev:frontend": "npm run dev -w @uniexam/frontend"
+    "dev:frontend": "npm run dev -w @uniexam/frontend",
+    "start": "node backend/scripts/run-local.mjs start",
+    "stop": "node backend/scripts/run-local.mjs stop",
+    "logs": "node backend/scripts/run-local.mjs logs",
+    "status": "node backend/scripts/run-local.mjs status",
+    "migrate": "node backend/scripts/run-local.mjs migrate",
+    "seed": "node backend/scripts/run-local.mjs seed",
+    "create-admin": "node backend/scripts/run-local.mjs create-admin",
+    "change-password": "node backend/scripts/run-local.mjs change-password"
   },
   "devDependencies": {
     "@types/node": "^20.14.10",

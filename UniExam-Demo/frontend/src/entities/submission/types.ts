@@ -15,6 +15,7 @@ export interface SessionQuestion {
   type: string;
   position: number;
   content: string;
+  imageDataUrl?: string | null;
   options: Array<{ id: string; text: string }>;
   points: number;
   allowMultiple: boolean;
@@ -59,6 +60,7 @@ export interface ReviewedQuestion {
   type: string;
   position: number;
   content: string;
+  imageDataUrl?: string | null;
   options: Array<{ id: string; text: string }>;
   points: number;
   selectedOptionIds: string[];
@@ -87,6 +89,8 @@ export interface ExamSummary {
 }
 
 export interface ResultRow {
+  sessionId: string | null;
+  fullscreenExitCount: number;
   studentId: string;
   username: string;
   fullName: string;
@@ -99,9 +103,30 @@ export interface ResultRow {
   maxScore: number | null;
 }
 
+export interface FullscreenEvent {
+  id: string;
+  type: 'fullscreen_enter' | 'fullscreen_exit';
+  clientTime: string;
+}
+
+export interface SessionEvents {
+  items: Array<FullscreenEvent & { receivedAt: string }>;
+  total: number;
+  fullscreenExitCount: number;
+}
+
 export interface ExamResults {
   exam: { id: string; title: string; subject: string; status: string; resultsPublished: boolean; resultsPublishedAt: string | null };
   rows: ResultRow[];
   publication: ResultsPublication;
-  stats: { audience: number; started: number; submitted: number; graded: number; averageScore: number | null };
+  stats: {
+    audience: number;
+    started: number;
+    submitted: number;
+    graded: number;
+    averageScore: number | null;
+    medianScore: number | null;
+    minScore: number | null;
+    maxScore: number | null;
+  };
 }

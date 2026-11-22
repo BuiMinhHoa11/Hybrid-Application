@@ -15,7 +15,7 @@ export function examStateBadge(e: StudentExam): { label: string; tone: BadgeTone
 
 /** UC01A: trang "Kỳ thi". */
 export default function ExamListPage() {
-  const { data, error, loading, reload } = useAsync(() => studentExamApi.list(), []);
+  const { data, error, loading, reload } = useAsync(() => studentExamApi.list(), [], 'student-exams:list');
 
   // Cập nhật định kỳ để trạng thái "Sắp diễn ra" -> "Đang mở" tự đổi mà không cần tải lại trang.
   useEffect(() => {

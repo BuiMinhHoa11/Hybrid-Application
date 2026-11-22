@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { DIFFICULTIES, MAX_ACCEPTED_ANSWERS, MAX_TEXT_ANSWER_LENGTH, normalizeTextAnswer, type Difficulty, type QuestionType } from '@uniexam/contracts';
 import type { Question, QuestionFilters, QuestionInput } from '../../entities/question/types';
 import { difficultyLabel, optionLetter } from '../../shared/lib';
-import { Button, ErrorAlert, Field } from '../../shared/ui';
+import { Button, ErrorAlert, Field, QuestionImage } from '../../shared/ui';
 
 interface DraftOption {
   text: string;
@@ -54,6 +54,11 @@ export function QuestionForm({
   const [type, setType] = useState<QuestionType>(initial?.type ?? 'multiple_choice');
   const [acceptedAnswersText, setAcceptedAnswersText] = useState(initial?.type === 'fill_blank' ? initial.correctOptionIds.join('\n') : '');
   const [content, setContent] = useState(initial?.content ?? '');
+  const [imageDataUrl, setImageDataUrl] = useState<string | null>(initial?.imageDataUrl ?? null);
+  const [imageError, setImageError] = useState('');
+  const [imageReading, setImageReading] = useState(false);
+  const imageInputId = useId();
+  const imageReader = useRef<FileReader | null>(null);
   const [points, setPoints] = useState<number>(initial?.points ?? 1);
   const [options, setOptions] = useState<DraftOption[]>(
     initial?.type === 'multiple_choice'
@@ -69,10 +74,41 @@ export function QuestionForm({
   const [busy, setBusy] = useState(false);
   const [serverError, setServerError] = useState<unknown>();
 
+  useEffect(() => () => {
+    if (imageReader.current?.readyState === FileReader.LOADING) imageReader.current.abort();
+  }, []);
+
+  const chooseImage = (file?: File) => {
+    if (!file || busy || imageReader.current?.readyState === FileReader.LOADING) return;
+    setImageError('');
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setImageError('Chỉ hỗ trợ ảnh PNG, JPEG hoặc WebP.');
+      return;
+    }
+    if (!file.size || file.size > 2 * 1024 * 1024) {
+      setImageError('Ảnh phải có dữ liệu và không vượt quá 2 MB.');
+      return;
+    }
+    setImageReading(true);
+    const reader = new FileReader();
+    imageReader.current = reader;
+    reader.onload = () => {
+      if (typeof reader.result === 'string') setImageDataUrl(reader.result);
+      else setImageError('Không đọc được ảnh. Vui lòng chọn lại.');
+      setImageReading(false);
+    };
+    reader.onerror = () => {
+      setImageError('Không đọc được ảnh. Vui lòng chọn lại.');
+      setImageReading(false);
+    };
+    reader.readAsDataURL(file);
+  };
+
   const setOption = (i: number, patch: Partial<DraftOption>) =>
     setOptions((prev) => prev.map((o, idx) => (idx === i ? { ...o, ...patch } : o)));
 
   const submit = async () => {
+    if (busy || imageReading || imageError) return;
     const acceptedAnswers = acceptedAnswersText.split(/\r?\n/).map((answer) => answer.trim()).filter(Boolean);
     const found = validateQuestionForm({ subject, content, options, points, type, acceptedAnswers });
     setErrors(found);
@@ -87,6 +123,7 @@ export function QuestionForm({
         difficulty,
         type,
         content: content.trim(),
+        imageDataUrl,
         points,
         // Mã lựa chọn theo thứ tự A, B, C... để đồng nhất với bảng đáp án.
         options: type === 'fill_blank' ? [] : options.map((o, i) => ({ id: optionLetter(i), text: o.text.trim() })),
@@ -135,6 +172,23 @@ export function QuestionForm({
         <Field label="Nội dung câu hỏi" error={errors.content} className="full">
           <textarea maxLength={5000} placeholder={type === 'fill_blank' ? 'Ví dụ: Thủ đô của Việt Nam là ___.' : undefined} value={content} onChange={(e) => setContent(e.target.value)} />
         </Field>
+        <div className="field full">
+          <label className="field-label" htmlFor={imageInputId}>Hình ảnh minh họa (tùy chọn)</label>
+          <input id={imageInputId} type="file" accept="image/png,image/jpeg,image/webp"
+            disabled={busy || imageReading} aria-describedby={`${imageInputId}-help`}
+            aria-invalid={!!imageError} onChange={(event) => {
+              chooseImage(event.currentTarget.files?.[0]);
+              event.currentTarget.value = '';
+            }} />
+          <span id={`${imageInputId}-help`} className="muted small">Mỗi câu một ảnh PNG, JPEG hoặc WebP, tối đa 2 MB và 12 triệu điểm ảnh.</span>
+          {imageReading && <span role="status" className="muted small">Đang đọc ảnh...</span>}
+          {imageError && <span role="alert" className="error-text">{imageError}</span>}
+          <QuestionImage src={imageDataUrl} alt="Ảnh minh họa đang chọn" />
+          {(imageDataUrl || imageError) && <div><Button small disabled={busy || imageReading} onClick={() => {
+            setImageDataUrl(null);
+            setImageError('');
+          }}>Xóa ảnh</Button></div>}
+        </div>
       </div>
 
       {type === 'fill_blank' ? (
@@ -177,7 +231,7 @@ export function QuestionForm({
         <Button onClick={onCancel} disabled={busy}>
           Hủy
         </Button>
-        <Button variant="primary" onClick={submit} disabled={busy}>
+        <Button variant="primary" onClick={submit} disabled={busy || imageReading || !!imageError}>
           {busy ? 'Đang lưu...' : saveLabel}
         </Button>
       </div>

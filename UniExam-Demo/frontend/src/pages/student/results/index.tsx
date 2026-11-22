@@ -15,7 +15,7 @@ export default function ResultsPage() {
 }
 
 function ResultList() {
-  const { data, error, loading, reload } = useAsync(() => studentResultApi.list(), []);
+  const { data, error, loading, reload } = useAsync(() => studentResultApi.list(), [], 'student-results:list');
 
   // Theo dõi cả bài đã chấm đang chờ công bố để sinh viên tự thấy kết quả khi giáo viên công bố sớm.
   const waiting = data?.items.some((i) => i.status !== 'published') ?? false;
@@ -70,7 +70,7 @@ function ResultList() {
 }
 
 function ResultDetail({ examId }: { examId: string }) {
-  const { data, error, loading } = useAsync(() => studentResultApi.detail(examId), [examId]);
+  const { data, error, loading } = useAsync(() => studentResultApi.detail(examId), [examId], 'student-results:detail');
   if (loading && !data) return <Spinner />;
   if (error || !data) {
     return (

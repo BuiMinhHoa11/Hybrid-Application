@@ -89,7 +89,40 @@ sudo ss -ltnp | grep -E ':(8080|8081|5432|6379)\b'
 # đúng: 8080 chỉ trên 10.200.0.2, 8081 chỉ trên 127.0.0.1, không có 5432/6379
 ```
 
----
+### 1.7 Cập nhật code và database
+
+Code Python được gắn thẳng từ thư mục repo vào container (khối `volumes` trong `compose.private.yaml`), nên **không phải build lại image** khi sửa code:
+
+```bash
+cd ~/Hybrid-Application && git fetch origin && git reset --hard origin/main
+cd UniExam-Demo
+docker compose -f backend/compose.private.yaml up -d --no-build      # tạo lại container nếu compose/.env đổi
+docker compose -f backend/compose.private.yaml restart                 # chỉ đổi code Python
+docker compose -f backend/compose.private.yaml exec private-api python -m uniexam.cli init-db   # khi có migration mới
+```
+
+Chỉ khi đổi `requirements.lock.txt` hoặc `Dockerfile` mới phải build lại image. Build trên VM private rất lâu, nên build trên EC2 rồi chuyển sang (`docker save` → tải qua WireGuard → `docker load`). Image cũ chưa có Pillow vẫn chạy được: ảnh câu hỏi khi đó chỉ được kiểm tra định dạng và dung lượng.
+
+### 1.8 Email lịch thi (tùy chọn)
+
+Khi giáo viên phát hành kỳ thi, `private-api` gửi email lịch thi cho sinh viên có email (nếu có hẹn giờ công bố thì gửi vào giờ đó). Hàng đợi nằm ở bảng `email_notifications`; SMTP lỗi thì thử lại tối đa 3 lần.
+
+1. Thêm khối `EMAIL_*`/`SMTP_*` vào `.env` (mẫu trong `.env.private.example`). Gmail cần **mật khẩu ứng dụng** 16 ký tự (bật xác minh 2 bước trước). Amazon SES: xác minh email/domain gửi đi, tạo SMTP credentials; ở chế độ sandbox chỉ gửi được tới địa chỉ đã xác minh.
+2. Tạo lại container để nhận biến môi trường mới, áp migration, rồi gửi thử:
+
+```bash
+docker compose -f backend/compose.private.yaml up -d --no-build
+docker compose -f backend/compose.private.yaml exec private-api python -m uniexam.cli init-db
+docker compose -f backend/compose.private.yaml exec private-api python -m uniexam.cli send-test-email <email-của-bạn>
+```
+
+3. Admin nhập email cho sinh viên ở trang **Quản lý tài khoản**. Sinh viên không có email sẽ không nhận thông báo.
+
+Xem tình trạng gửi: `SELECT status, count(*) FROM email_notifications GROUP BY status;` (`failed` có lý do ở cột `last_error`).
+
+### 1.9 Giữ đáp án khi mất mạng
+
+Không cần cấu hình. Khi sinh viên mất mạng hoặc không gọi được private-api, đáp án chưa gửi được giữ trong `localStorage` của trình duyệt (kể cả khi tải lại trang), và tự gửi lên khi kết nối lại. Phòng thi cũng mở lại được từ bản sao đề trên máy. Giới hạn: sinh viên phải dùng lại đúng trình duyệt đó, và chỉ nộp được khi đã có kết nối trước giờ hết hạn.
 
 ## 2. uniexam-public (AWS EC2)
 
@@ -161,6 +194,54 @@ curl -s https://uniexam.publicvm.com/exam-api/health       # thẳng private-api
 Sau đó mở `https://uniexam.publicvm.com`, đăng nhập admin, vào **Trạng thái hệ thống**: database, public-api, private-api, grading-worker, frontend đều phải **up**.
 
 ---
+
+### 2.6 Backup PostgreSQL lên S3
+
+Script `backend/scripts/backup-to-s3.sh` chạy trên EC2: SSH qua WireGuard vào private bằng một khóa chỉ được phép chạy `pg_dump`, nén, kiểm tra, rồi đẩy lên `s3://uniexam-submission-442532936214-ap-southeast-2/backups/postgres/` bằng IAM role của EC2.
+
+**Bản backup chứa toàn bộ database:** tài khoản (mật khẩu đã băm), ngân hàng câu hỏi kèm ảnh, đề thi, kỳ thi và danh sách dự thi, phiên làm bài, đáp án, bài nộp, điểm, nhật ký toàn màn hình, hàng đợi email. **Không chứa:** Redis (chỉ là hàng đợi tạm), file `.env` (giữ riêng), code (đã có trên git).
+
+Cài đặt một lần:
+
+```bash
+# EC2: cài AWS CLI, kiểm tra IAM role ghi được vào bucket
+sudo snap install aws-cli --classic
+aws sts get-caller-identity
+echo test | aws s3 cp - s3://uniexam-submission-442532936214-ap-southeast-2/backups/postgres/test.txt
+
+# EC2: tạo khóa SSH riêng cho backup và in khóa công khai
+ssh-keygen -t ed25519 -f ~/.ssh/uniexam-backup -N "" -C uniexam-backup
+cat ~/.ssh/uniexam-backup.pub
+```
+
+Trên **uniexam-private**, thêm một dòng vào `~/.ssh/authorized_keys` (thay `<KHÓA_CÔNG_KHAI>` bằng nội dung vừa in, bắt đầu bằng `ssh-ed25519`). Phần `command=` khiến khóa này chỉ chạy được `pg_dump`:
+
+```text
+restrict,command="docker exec uniexam-postgres pg_dump -U uniexam -d uniexam --no-owner --clean --if-exists" <KHÓA_CÔNG_KHAI>
+```
+
+Chạy thử rồi đặt lịch hằng đêm (19:30 UTC = 02:30 giờ Việt Nam):
+
+```bash
+~/Hybrid-Application/UniExam-Demo/backend/scripts/backup-to-s3.sh
+(crontab -l 2>/dev/null; echo '30 19 * * * $HOME/Hybrid-Application/UniExam-Demo/backend/scripts/backup-to-s3.sh >> $HOME/uniexam-backups/backup.log 2>&1') | crontab -
+```
+
+Trên S3, tạo **Lifecycle rule** cho tiền tố `backups/postgres/`: xóa bản cũ hơn 30 ngày.
+
+**Khôi phục** (ghi đè database hiện tại; dừng app trước):
+
+```bash
+# trên uniexam-private
+docker compose -f ~/Hybrid-Application/UniExam-Demo/backend/compose.private.yaml stop
+# trên EC2: tải bản backup và đổ thẳng vào PostgreSQL bên private
+aws s3 cp s3://uniexam-submission-442532936214-ap-southeast-2/backups/postgres/<TÊN_FILE>.sql.gz - \
+  | gunzip | ssh -i ~/.ssh/<KHÓA_SSH_THƯỜNG> ubuntu@10.200.0.2 'docker exec -i uniexam-postgres psql -U uniexam -d uniexam'
+# trên uniexam-private
+docker compose -f ~/Hybrid-Application/UniExam-Demo/backend/compose.private.yaml start
+```
+
+Khi khôi phục phải dùng một khóa SSH **thường** (không phải khóa backup, vì khóa backup chỉ chạy được `pg_dump`).
 
 ## Xử lý nhanh
 

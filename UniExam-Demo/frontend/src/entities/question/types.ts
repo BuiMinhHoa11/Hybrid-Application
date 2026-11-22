@@ -13,6 +13,7 @@ export interface Question {
   difficulty: Difficulty;
   type: QuestionType;
   content: string;
+  imageDataUrl?: string | null;
   options: QuestionOption[];
   correctOptionIds: string[];
   points: number;

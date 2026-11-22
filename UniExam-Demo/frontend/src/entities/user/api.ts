@@ -31,5 +31,6 @@ export const adminUserApi = {
   update: (id: string, input: UserInput) => publicApi.put<User>(`/admin/users/${id}`, input),
   lock: (id: string) => publicApi.post<User>(`/admin/users/${id}/lock`),
   unlock: (id: string) => publicApi.post<User>(`/admin/users/${id}/unlock`),
+  remove: (id: string) => publicApi.delete<{ deleted: true }>(`/admin/users/${id}`),
   systemStatus: () => publicApi.get<SystemStatus>('/admin/system-status')
 };

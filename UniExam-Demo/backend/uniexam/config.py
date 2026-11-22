@@ -21,6 +21,19 @@ class Settings(BaseSettings):
     grading_poll_seconds: float = Field(default=2, gt=0)
     lifecycle_interval_seconds: float = Field(default=5, gt=0)
     lifecycle_enabled: bool = True
+    # Email thông báo lịch thi (SMTP: Gmail, Amazon SES SMTP, Mailpit khi dev...)
+    email_enabled: bool = False
+    smtp_host: str = "localhost"
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = True
+    smtp_ssl: bool = False
+    mail_from: str = "UniExam <no-reply@localhost>"
+    app_public_url: str = "http://localhost:5173"
+    email_poll_seconds: float = Field(default=10, gt=0)
+    # Khoảng nghỉ giữa hai email; Amazon SES sandbox chỉ cho 1 email/giây nên đặt 1.1
+    email_send_interval_seconds: float = Field(default=0, ge=0, le=60)
 
     @model_validator(mode="after")
     def secure_production(self):

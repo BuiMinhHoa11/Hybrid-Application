@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { paperApi, teacherExamApi } from '../../entities/exam/api';
-import type { AudienceMember, TeacherExam, ValidationIssue } from '../../entities/exam/types';
+import type { AudienceMember, EmailNotificationSummary, TeacherExam, ValidationIssue } from '../../entities/exam/types';
 import { formatDateTime, formatDuration, fromLocalInput, toLocalInput, useAsync } from '../../shared/lib';
 import { Alert, Button, ConfirmDialog, ErrorAlert, Field } from '../../shared/ui';
 import { parseUsernames } from './audience';
@@ -9,8 +9,18 @@ interface Props {
   /** Có exam nghĩa là đang xem/sửa; không có nghĩa là tạo mới. */
   exam?: TeacherExam;
   audience?: AudienceMember[];
-  onChanged: () => void;
+  /** message: thông báo cho trang danh sách sau khi phát hành (ví dụ tình trạng gửi email). */
+  onChanged: (message?: string) => void;
   onClose: () => void;
+}
+
+function publishMessage(email: EmailNotificationSummary | undefined, scheduledAt: string | null) {
+  const head = scheduledAt ? `Đã hẹn công bố kỳ thi lúc ${formatDateTime(scheduledAt)}.` : 'Đã phát hành kỳ thi.';
+  if (!email?.enabled) return head;
+  const when = scheduledAt ? 'sẽ được gửi vào giờ công bố' : 'đang được gửi';
+  const sent = email.queued > 0 ? ` Email lịch thi ${when} tới ${email.queued} sinh viên.` : '';
+  const missing = email.missingEmail > 0 ? ` ${email.missingEmail} sinh viên chưa có email nên không nhận được thông báo.` : '';
+  return head + sent + missing;
 }
 
 /**
@@ -37,7 +47,7 @@ export function ExamForm({ exam, audience, onChanged, onClose }: Props) {
   const [issues, setIssues] = useState<ValidationIssue[]>([]);
   const [confirmPublish, setConfirmPublish] = useState(false);
 
-  const papers = useAsync(() => paperApi.list(), []);
+  const papers = useAsync(() => paperApi.list(), [], 'papers:list');
   const readOnly = !!exam && exam.status !== 'draft';
   const usernames = parseUsernames(audienceText);
 
@@ -109,8 +119,8 @@ export function ExamForm({ exam, audience, onChanged, onClose }: Props) {
     run(async () => {
       try {
         const id = await save();
-        await teacherExamApi.publish(id);
-        onChanged();
+        const res = await teacherExamApi.publish(id);
+        onChanged(publishMessage(res.emailNotifications, res.publishAt));
         onClose();
       } finally {
         setConfirmPublish(false);
@@ -217,8 +227,8 @@ export function ExamForm({ exam, audience, onChanged, onClose }: Props) {
           onConfirm={publish}
           onCancel={() => setConfirmPublish(false)}
           message={scheduled
-            ? `Kỳ thi sẽ hiển thị cho sinh viên từ ${formatDateTime(fromLocalInput(publishAt))}. Sinh viên chỉ làm bài từ giờ bắt đầu. Sau khi xác nhận, bạn không thể chỉnh sửa kỳ thi nữa.`
-            : 'Sau khi phát hành, sinh viên thuộc đối tượng dự thi sẽ nhìn thấy kỳ thi và bạn không thể chỉnh sửa nữa. Hệ thống sẽ kiểm tra lại toàn bộ trước khi phát hành.'}
+            ? `Kỳ thi sẽ hiển thị cho sinh viên từ ${formatDateTime(fromLocalInput(publishAt))}, kèm email lịch thi gửi tới sinh viên có email. Sinh viên chỉ làm bài từ giờ bắt đầu. Sau khi xác nhận, bạn không thể chỉnh sửa kỳ thi nữa.`
+            : 'Sau khi phát hành, sinh viên thuộc đối tượng dự thi sẽ nhìn thấy kỳ thi và nhận email lịch thi (nếu có email). Bạn không thể chỉnh sửa kỳ thi nữa. Hệ thống sẽ kiểm tra lại toàn bộ trước khi phát hành.'}
         />
       )}
     </div>

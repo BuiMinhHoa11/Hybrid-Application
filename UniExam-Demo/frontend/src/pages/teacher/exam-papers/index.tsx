@@ -3,11 +3,11 @@ import { paperApi } from '../../../entities/exam/api';
 import type { PaperListItem } from '../../../entities/exam/types';
 import { PaperBuilder } from '../../../features/paper-builder';
 import { difficultyLabel, formatDateTime, formatScore, optionLetter, useAsync } from '../../../shared/lib';
-import { Alert, Badge, Button, Card, ConfirmDialog, ErrorAlert, Modal, PageHeader, Spinner } from '../../../shared/ui';
+import { Alert, Badge, Button, Card, ConfirmDialog, ErrorAlert, Modal, PageHeader, QuestionImage, Spinner } from '../../../shared/ui';
 
 /** UC02B: trang "Đề thi". */
 export default function ExamPapersPage() {
-  const list = useAsync(() => paperApi.list(), []);
+  const list = useAsync(() => paperApi.list(), [], 'papers:list');
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<PaperListItem | null>(null);
@@ -111,7 +111,7 @@ export default function ExamPapersPage() {
 }
 
 function PaperView({ id, onClose }: { id: string; onClose: () => void }) {
-  const { data, error, loading } = useAsync(() => paperApi.get(id), [id]);
+  const { data, error, loading } = useAsync(() => paperApi.get(id), [id], 'papers:detail');
   return (
     <Modal title={data?.paper.title ?? 'Đề thi'} onClose={onClose} wide footer={<Button onClick={onClose}>Đóng</Button>}>
       <ErrorAlert error={error} />
@@ -133,6 +133,7 @@ function PaperView({ id, onClose }: { id: string; onClose: () => void }) {
                     {formatScore(q.points)} điểm · {difficultyLabel[q.difficulty]}
                   </span>
                 </div>
+                <QuestionImage src={q.imageDataUrl} alt={`Hình minh họa câu ${q.position}`} />
                 {q.type === 'fill_blank' ? (
                   <div className="review-opt correct">Đáp án được chấp nhận: {q.correctOptionIds.join(' / ')}</div>
                 ) : q.options.map((o, i) => (

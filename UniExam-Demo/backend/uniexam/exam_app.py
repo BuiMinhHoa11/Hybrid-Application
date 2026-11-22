@@ -22,11 +22,25 @@ async def lifecycle_loop():
         await asyncio.sleep(settings.lifecycle_interval_seconds)
 
 
+async def notification_loop():
+    from .notifications import send_due_batch
+    while True:
+        try:
+            await asyncio.to_thread(send_due_batch)
+        except Exception as exc:
+            logging.getLogger("uniexam").error("Email notifications failed: %s", type(exc).__name__)
+        await asyncio.sleep(settings.email_poll_seconds)
+
+
 @asynccontextmanager
 async def lifespan(_app):
-    task = asyncio.create_task(lifecycle_loop()) if settings.lifecycle_enabled else None
+    tasks = []
+    if settings.lifecycle_enabled:
+        tasks.append(asyncio.create_task(lifecycle_loop()))
+    if settings.email_enabled:
+        tasks.append(asyncio.create_task(notification_loop()))
     yield
-    if task:
+    for task in tasks:
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task

@@ -1,5 +1,6 @@
 import { formatScore, optionLetter } from '../../shared/lib';
 import type { SubmissionReview } from './types';
+import { QuestionImage } from '../../shared/ui';
 
 /** Danh sách câu hỏi kèm đáp án đã chọn, đáp án đúng và điểm từng câu (nhỏ, dùng chung cho sinh viên và giáo viên). */
 export function ReviewList({ review }: { review: SubmissionReview }) {
@@ -16,6 +17,7 @@ export function ReviewList({ review }: { review: SubmissionReview }) {
               {formatScore(q.points)} điểm
             </span>
           </div>
+          <QuestionImage src={q.imageDataUrl} alt={`Hình minh họa câu ${q.position}`} />
           {q.type === 'fill_blank' ? (
             <div>
               {q.selectedOptionIds.length > 0 && (

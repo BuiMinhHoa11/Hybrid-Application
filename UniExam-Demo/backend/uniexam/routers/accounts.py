@@ -81,13 +81,26 @@ def user_detail(user_id: UUID, db: Session = Depends(get_db, scope="function"), 
     return dto(user)
 
 
+def check_email(db, role, email, user_id=None):
+    """Sinh viên bắt buộc có email (để nhận lịch thi); email không được trùng tài khoản khác."""
+    if role == "student" and not email:
+        raise AppError(422, "Tài khoản sinh viên bắt buộc có email để nhận thông báo lịch thi", "VALIDATION_ERROR",
+                       [{"field": "email", "message": "Nhập email của sinh viên"}])
+    if email and one(db, "SELECT 1 AS x FROM users WHERE lower(email)=lower(:email) AND (CAST(:id AS uuid) IS NULL OR id<>:id)",
+                     email=email, id=user_id):
+        raise AppError(409, "Email này đã được dùng cho tài khoản khác", "DUPLICATE",
+                       [{"field": "email", "message": "Email đã tồn tại"}])
+
+
 @router.post("/admin/users", status_code=201)
 def create_user(body: CreateUser, db: Session = Depends(get_db, scope="function"), _admin=Depends(admin_user, scope="function")):
     if not body.full_name.strip():
         raise AppError(422, "Nhập họ tên", "VALIDATION_ERROR")
+    email = str(body.email) if body.email else None
+    check_email(db, body.role, email)
     user = one(db, f"""INSERT INTO users(username,full_name,email,role,password_hash)
       VALUES (:username,:name,:email,:role,:password) RETURNING {USER_COLUMNS}""",
-      username=body.username, name=body.full_name.strip(), email=str(body.email) if body.email else None,
+      username=body.username, name=body.full_name.strip(), email=email,
       role=body.role, password=hash_password(body.password))
     return dto(user)
 
@@ -119,6 +132,8 @@ def update_user(user_id: UUID, body: UpdateUser, db: Session = Depends(get_db, s
             raise AppError(422, "Nhập họ tên", "VALIDATION_ERROR")
     if "email" in values and values["email"]:
         values["email"] = str(values["email"])
+    if "email" in values or "role" in values:
+        check_email(db, values.get("role", target["role"]), values.get("email", target["email"]), user_id)
     if values:
         # Column names come only from the fixed Pydantic model, never from raw input.
         sets = ", ".join(f"{key}=:{key}" for key in values)
@@ -133,6 +148,34 @@ def set_active(user_id, active, db, actor):
         raise AppError(404, "Không tìm thấy tài khoản", "NOT_FOUND")
     protect_admin(db, target, actor, active=active)
     return dto(one(db, f"UPDATE users SET is_active=:active WHERE id=:id RETURNING {USER_COLUMNS}", id=user_id, active=active))
+
+
+@router.delete("/admin/users/{user_id}")
+def delete_user(user_id: UUID, db: Session = Depends(get_db, scope="function"), actor=Depends(admin_user, scope="function")):
+    """Xóa hẳn tài khoản chưa có dữ liệu. Tài khoản đã có dữ liệu thi thì chỉ được khóa, để giữ lịch sử bài làm và điểm."""
+    run(db, "SELECT pg_advisory_xact_lock(908122)")
+    target = one(db, "SELECT * FROM users WHERE id=:id FOR UPDATE", id=user_id)
+    if not target:
+        raise AppError(404, "Không tìm thấy tài khoản", "NOT_FOUND")
+    if target["id"] == actor["id"]:
+        raise AppError(409, "Không thể tự xóa tài khoản của mình", "SELF_UPDATE")
+    if target["role"] == "admin" and target["is_active"]:
+        if one(db, "SELECT count(*) AS n FROM users WHERE role='admin' AND is_active")["n"] <= 1:
+            raise AppError(409, "Phải giữ ít nhất một quản trị viên đang hoạt động", "LAST_ADMIN")
+    usage = one(db, """SELECT
+      (SELECT count(*) FROM questions WHERE owner_id=:id)::int AS questions,
+      (SELECT count(*) FROM exam_papers WHERE owner_id=:id)::int AS papers,
+      (SELECT count(*) FROM exams WHERE owner_id=:id OR results_published_by=:id)::int AS exams,
+      (SELECT count(*) FROM exam_sessions WHERE student_id=:id)::int AS attempts""", id=user_id)
+    labels = {"questions": "câu hỏi", "papers": "đề thi", "exams": "kỳ thi", "attempts": "lượt làm bài"}
+    in_use = [f"{count} {labels[key]}" for key, count in usage.items() if count]
+    if in_use:
+        raise AppError(409, f"Tài khoản đang có dữ liệu ({', '.join(in_use)}) nên không thể xóa. Hãy dùng chức năng Khóa để chặn đăng nhập.",
+                       "IN_USE", dto(usage))
+    # Sinh viên chưa làm bài: gỡ khỏi danh sách dự thi (email lịch thi đang chờ tự hủy theo ON DELETE CASCADE).
+    run(db, "DELETE FROM exam_audience WHERE student_id=:id", id=user_id)
+    run(db, "DELETE FROM users WHERE id=:id", id=user_id)
+    return {"deleted": True}
 
 
 @router.post("/admin/users/{user_id}/lock")

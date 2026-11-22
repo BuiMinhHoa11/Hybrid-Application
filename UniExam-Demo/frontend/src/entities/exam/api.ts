@@ -2,7 +2,7 @@ import type { Difficulty, ExamStatus } from '@uniexam/contracts';
 import { publicApi } from '../../shared/api';
 import type { Page } from '../user/types';
 import type { Question } from '../question/types';
-import type { AudienceMember, ExamInput, PaperDetail, PaperListItem, StudentExam, TeacherExam, ValidationIssue } from './types';
+import type { AudienceMember, EmailNotificationSummary, ExamInput, PaperDetail, PaperListItem, StudentExam, TeacherExam, ValidationIssue } from './types';
 
 export const studentExamApi = {
   list: () => publicApi.get<{ serverTime: string; items: StudentExam[] }>('/student/exams'),
@@ -19,7 +19,8 @@ export const teacherExamApi = {
   setAudience: (id: string, usernames: string[]) =>
     publicApi.put<{ audience: AudienceMember[] }>(`/teacher/exams/${id}/audience`, { usernames }),
   validate: (id: string) => publicApi.post<{ valid: boolean; issues: ValidationIssue[] }>(`/teacher/exams/${id}/validate`),
-  publish: (id: string) => publicApi.post<TeacherExam>(`/teacher/exams/${id}/publish`)
+  publish: (id: string) =>
+    publicApi.post<TeacherExam & { emailNotifications?: EmailNotificationSummary }>(`/teacher/exams/${id}/publish`)
 };
 
 export interface PaperAutoRule {

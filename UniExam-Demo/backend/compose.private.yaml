@@ -19,6 +19,17 @@ x-env: &env
   LIFECYCLE_ENABLED: ${LIFECYCLE_ENABLED:-true}
   GRADING_QUEUE_NAME: ${GRADING_QUEUE_NAME:-uniexam:grading}
   GRADING_QUEUE_GROUP: ${GRADING_QUEUE_GROUP:-grading-workers}
+  # Email lịch thi (private-api gửi qua SMTP khi giáo viên phát hành kỳ thi)
+  EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
+  SMTP_HOST: ${SMTP_HOST:-localhost}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+  SMTP_SSL: ${SMTP_SSL:-false}
+  MAIL_FROM: ${MAIL_FROM:-UniExam <no-reply@localhost>}
+  APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://uniexam.publicvm.com}
+  EMAIL_SEND_INTERVAL_SECONDS: ${EMAIL_SEND_INTERVAL_SECONDS:-0}
 
 # Healthcheck của Docker đang TẮT vì VM quá chậm (healthcheck bị treo chồng chất).
 # Giám sát bằng script /srv/uniexam/healthcheck.sh (curl từ bên ngoài, chạy bằng cron).

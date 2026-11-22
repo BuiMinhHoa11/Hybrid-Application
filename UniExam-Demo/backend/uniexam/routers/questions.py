@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from uniexam.common import Schema, dump_json, question_dto
 from uniexam.db import get_db, many, one, run
 from uniexam.errors import AppError
+from uniexam.question_images import MAX_IMAGE_DATA_URL_LENGTH, validate_question_image
 from uniexam.security import require_owned, teacher_user
 
 router = APIRouter(tags=["Question bank"])
@@ -40,10 +41,16 @@ class QuestionInput(Schema):
     difficulty: Literal["easy", "medium", "hard"] = "medium"
     type: Literal["multiple_choice", "fill_blank"] = "multiple_choice"
     content: str = Field(min_length=1, max_length=5000)
+    image_data_url: str | None = Field(default=None, max_length=MAX_IMAGE_DATA_URL_LENGTH)
     options: list[Option] = Field(default_factory=list, max_length=8)
     correct_option_ids: list[str] = Field(default_factory=list, max_length=8)
     accepted_answers: list[str] | None = Field(default=None, max_length=8)
     points: Decimal = Field(gt=0, le=100, max_digits=6, decimal_places=2, allow_inf_nan=False)
+
+    @field_validator("image_data_url")
+    @classmethod
+    def valid_image(cls, value):
+        return validate_question_image(value)
 
     @field_validator("subject", "content")
     @classmethod
@@ -147,9 +154,9 @@ def question_params(body: QuestionInput):
 @router.post("/teacher/questions", status_code=201)
 def create_question(body: QuestionInput, db: Session = Depends(get_db, scope="function"), user=Depends(teacher_user, scope="function")):
     row = one(db, """INSERT INTO questions(owner_id, subject, chapter, topic, difficulty, type, content,
-      options, correct_option_ids, accepted_answers, points)
+      image_data_url, options, correct_option_ids, accepted_answers, points)
       VALUES (:owner, :subject, :chapter, :topic, :difficulty, :type, :content,
-      CAST(:options AS jsonb), CAST(:correct_option_ids AS text[]), CAST(:accepted_answers AS text[]), :points) RETURNING *""",
+      :image_data_url, CAST(:options AS jsonb), CAST(:correct_option_ids AS text[]), CAST(:accepted_answers AS text[]), :points) RETURNING *""",
       owner=user["id"], **question_params(body))
     return question_dto(row)
 
@@ -158,7 +165,7 @@ def create_question(body: QuestionInput, db: Session = Depends(get_db, scope="fu
 def update_question(question_id: UUID, body: QuestionInput, db: Session = Depends(get_db, scope="function"), user=Depends(teacher_user, scope="function")):
     load_question(db, question_id, user, lock=True)
     row = one(db, """UPDATE questions SET subject=:subject, chapter=:chapter, topic=:topic, difficulty=:difficulty,
-      type=:type, content=:content, options=CAST(:options AS jsonb), correct_option_ids=CAST(:correct_option_ids AS text[]),
+      type=:type, content=:content, image_data_url=:image_data_url, options=CAST(:options AS jsonb), correct_option_ids=CAST(:correct_option_ids AS text[]),
       accepted_answers=CAST(:accepted_answers AS text[]), points=:points WHERE id=:id RETURNING *""", id=question_id, **question_params(body))
     return question_dto(row)
 

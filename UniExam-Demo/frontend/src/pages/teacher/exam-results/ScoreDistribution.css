@@ -1,0 +1,27 @@
+.score-distribution { min-width: 0; }
+.score-distribution-plot { position: relative; width: 100%; }
+.score-distribution svg { display: block; width: 100%; height: auto; overflow: hidden; }
+.score-distribution text { fill: var(--text); font-family: inherit; font-size: 13px; }
+.score-distribution .score-distribution-axis-label { fill: var(--muted); font-size: 12px; }
+.score-distribution-grid { stroke: var(--border); vector-effect: non-scaling-stroke; }
+.score-distribution-pass { stroke: var(--muted); opacity: 0.4; stroke-dasharray: 3 5; }
+.score-distribution-bar, .score-distribution-dot { fill: var(--primary); }
+.score-distribution-markers { stroke: var(--text); pointer-events: none; }
+.score-distribution-marker-label { stroke: var(--surface); stroke-width: 5px; stroke-linejoin: round; paint-order: stroke; font-weight: 600; }
+.score-distribution-hit { fill: transparent; }
+.score-distribution-hit:focus-visible, .score-distribution-dot:focus-visible { outline: none; stroke: var(--text); stroke-width: 2px; }
+.score-distribution-tooltip {
+  position: absolute;
+  top: 94px;
+  transform: translateX(-50%);
+  width: min(240px, 80%);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 3px 10px var(--border);
+}

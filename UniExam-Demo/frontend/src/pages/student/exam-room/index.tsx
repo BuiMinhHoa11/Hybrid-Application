@@ -2,26 +2,29 @@ import { useEffect, useState } from 'react';
 import { MAX_TEXT_ANSWER_LENGTH } from '@uniexam/contracts';
 import { Link, useParams } from 'react-router-dom';
 import { CountdownTimer, FlagReview, QuestionPalette, SubmitDialog, useExamSession, type SaveStatus } from '../../../features/exam-taking';
+import { useExamFullscreen } from '../../../features/exam-taking/useExamFullscreen';
 import { optionLetter } from '../../../shared/lib';
-import { Alert, Button, Card, ErrorAlert, Field, Spinner } from '../../../shared/ui';
+import { Alert, Button, Card, ErrorAlert, Field, QuestionImage, Spinner } from '../../../shared/ui';
 
 const SAVE_LABEL: Record<SaveStatus, string> = {
   idle: '',
   saving: 'Đang lưu...',
   saved: '✓ Đã lưu',
-  error: '⚠ Có đáp án chưa lưu. Kiểm tra kết nối và câu trả lời trước khi nộp.'
+  error: '⚠ Có đáp án chưa lưu lên máy chủ (đang giữ trên máy này và tự gửi lại). Kiểm tra kết nối trước khi nộp.'
 };
 
 /** UC01B: làm bài; UC01C: nộp bài. */
 export default function ExamRoomPage() {
   const { sessionId = '' } = useParams();
   const room = useExamSession(sessionId);
+  const fullscreen = useExamFullscreen(sessionId, room.payload?.session.status === 'in_progress' && !room.expired,
+    room.payload?.session.expiresAt, room.offsetMs);
   const [current, setCurrent] = useState(0);
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<unknown>();
 
-  const inProgress = room.payload?.session.status === 'in_progress';
+  const inProgress = room.payload?.session.status === 'in_progress' && !room.expired;
 
   // Cảnh báo khi vô tình đóng/tải lại trang lúc đang làm bài.
   useEffect(() => {
@@ -71,6 +74,39 @@ export default function ExamRoomPage() {
     );
   }
 
+  if (room.expired) {
+    return (
+      <div className="container">
+        <Card>
+          <div className="stack">
+            <h1>{payload.exam.title}</h1>
+            <Alert kind="info">Đã hết giờ làm bài. Giao diện đã khóa; hệ thống tự nộp các đáp án đã lưu.</Alert>
+            <ErrorAlert error={room.expiryError} />
+            {!room.expiryError && <Spinner label="Đang xác nhận trạng thái bài nộp..." />}
+            <Link to="/student/results">Xem trạng thái bài làm</Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!fullscreen.isFullscreen) {
+    return (
+      <div className="container">
+        <Card><div className="stack">
+          <h1>Yêu cầu toàn màn hình</h1>
+          <CountdownTimer expiresAtMs={Date.parse(payload.session.expiresAt)} offsetMs={room.offsetMs} onExpire={room.expire} />
+          <Alert kind="info">Bạn phải ở chế độ toàn màn hình để làm bài. Thời gian thi vẫn chạy; các lần thoát toàn màn hình được lưu trong nhật ký để giáo viên xem lại.</Alert>
+          <ErrorAlert error={fullscreen.error} />
+          {fullscreen.logError && <Alert>{fullscreen.logError}</Alert>}
+          <Button variant="primary" onClick={fullscreen.request} disabled={fullscreen.busy}>
+            {fullscreen.busy ? 'Đang mở toàn màn hình...' : 'Quay lại toàn màn hình và tiếp tục thi'}
+          </Button>
+        </div></Card>
+      </div>
+    );
+  }
+
   const questions = payload.questions;
   const q = questions[Math.min(current, questions.length - 1)];
   const answer = room.answerOf(q.id);
@@ -90,6 +126,13 @@ export default function ExamRoomPage() {
 
   return (
     <>
+      {fullscreen.logError && <Alert>{fullscreen.logError}</Alert>}
+      {room.offline && (
+        <Alert>
+          Đang mất kết nối tới máy chủ. Bạn vẫn làm bài bình thường: đáp án được giữ trên máy này và tự gửi lên khi
+          kết nối lại. Đừng xóa dữ liệu trình duyệt; chỉ bấm Nộp bài khi đã có kết nối.
+        </Alert>
+      )}
       <div className="room-top">
         <div className="room-top-inner">
           <div className="grow">
@@ -116,6 +159,7 @@ export default function ExamRoomPage() {
             </span>
           </div>
           <div className="question-text">{q.content}</div>
+          <QuestionImage src={q.imageDataUrl} alt={`Hình minh họa câu ${q.position}`} />
           {q.type === 'fill_blank' ? (
             <Field label="Câu trả lời của bạn">
               <input type="text" maxLength={MAX_TEXT_ANSWER_LENGTH} autoComplete="off" spellCheck={false}

@@ -8,6 +8,7 @@ import { PublishResults } from '../../../features/publish-results';
 import { examStatusLabel, formatDateTime, formatScore, submissionStatusLabel, useAsync } from '../../../shared/lib';
 import { Alert, Badge, Button, Card, ErrorAlert, Modal, PageHeader, Spinner, type BadgeTone } from '../../../shared/ui';
 import type { ExamStatus } from '@uniexam/contracts';
+import { ScoreDistribution } from './ScoreDistribution';
 
 const TONE: Record<SubmissionStatus, BadgeTone> = { pending_grading: 'gray', grading: 'blue', graded: 'green', failed: 'red' };
 
@@ -18,7 +19,7 @@ export default function ExamResultsPage() {
 }
 
 function ExamPicker() {
-  const { data, error, loading } = useAsync(() => examResultApi.exams(), []);
+  const { data, error, loading } = useAsync(() => examResultApi.exams(), [], 'exam-results:exams');
   return (
     <>
       <PageHeader title="Kết quả kỳ thi" />
@@ -70,8 +71,9 @@ function ExamPicker() {
 }
 
 function ResultsOfExam({ examId }: { examId: string }) {
-  const { data, error, loading, reload } = useAsync(() => examResultApi.results(examId), [examId]);
+  const { data, error, loading, reload } = useAsync(() => examResultApi.results(examId), [examId], 'exam-results:results');
   const [viewing, setViewing] = useState<ResultRow | null>(null);
+  const [viewingEvents, setViewingEvents] = useState<ResultRow | null>(null);
   useEffect(() => {
     if (data?.exam.resultsPublished) return;
     const timer = setInterval(reload, 5000);
@@ -112,9 +114,14 @@ function ResultsOfExam({ examId }: { examId: string }) {
           <Stat label="Đã vào thi" value={stats.started} />
           <Stat label="Đã nộp" value={stats.submitted} />
           <Stat label="Đã chấm" value={stats.graded} />
-          <Stat label="Điểm trung bình" value={stats.averageScore === null ? '—' : formatScore(stats.averageScore)} />
+          <Stat label="Điểm trung bình" value={formatScore(stats.averageScore).replace('.', ',')} />
+          <Stat label="Trung vị" value={formatScore(stats.medianScore).replace('.', ',')} />
+          <Stat label="Cao nhất" value={formatScore(stats.maxScore).replace('.', ',')} />
+          <Stat label="Thấp nhất" value={formatScore(stats.minScore).replace('.', ',')} />
         </div>
       </Card>
+
+      <ScoreDistribution rows={rows} stats={stats} />
 
       <Card>
         <div className="table-wrap">
@@ -126,6 +133,7 @@ function ResultsOfExam({ examId }: { examId: string }) {
                 <th>Nộp lúc</th>
                 <th>Trạng thái chấm</th>
                 <th>Điểm</th>
+                <th>Thoát toàn màn hình</th>
                 <th />
               </tr>
             </thead>
@@ -148,6 +156,11 @@ function ResultsOfExam({ examId }: { examId: string }) {
                     )}
                   </td>
                   <td>{r.score !== null ? `${formatScore(r.score)}/${formatScore(r.maxScore)}` : '—'}</td>
+                  <td>
+                    {r.sessionId ? <Button small onClick={() => setViewingEvents(r)}>
+                      Nhật ký ({r.fullscreenExitCount ?? 0} lần thoát)
+                    </Button> : '—'}
+                  </td>
                   <td className="actions">
                     {r.submissionId && (
                       <Button small onClick={() => setViewing(r)}>
@@ -166,6 +179,7 @@ function ResultsOfExam({ examId }: { examId: string }) {
       </p>
 
       {viewing && viewing.submissionId && <SubmissionView examId={examId} row={viewing} onClose={() => setViewing(null)} />}
+      {viewingEvents?.sessionId && <FullscreenEventsView examId={examId} row={viewingEvents} onClose={() => setViewingEvents(null)} />}
     </>
   );
 }
@@ -176,6 +190,31 @@ function Stat({ label, value }: { label: string; value: number | string }) {
       <div className="muted small">{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
     </div>
+  );
+}
+
+function FullscreenEventsView({ examId, row, onClose }: { examId: string; row: ResultRow; onClose: () => void }) {
+  const { data, error, loading, reload } = useAsync(() => examResultApi.events(examId, row.sessionId!), [examId, row.sessionId]);
+  return (
+    <Modal title={`Nhật ký toàn màn hình: ${row.fullName} (${row.username})`} onClose={onClose} wide footer={<>
+      <Button onClick={reload}>Làm mới</Button><Button onClick={onClose}>Đóng</Button>
+    </>}>
+      <ErrorAlert error={error} />
+      {loading && !data ? <Spinner /> : data && <div className="stack">
+        <strong>Số lần thoát toàn màn hình: {data.fullscreenExitCount}</strong>
+        <span className="muted small">Nhật ký phản ánh sự kiện do trình duyệt báo về. Thời điểm tiếp nhận được máy chủ lưu riêng.</span>
+        {!data.items.length ? <Alert kind="info">Chưa ghi nhận sự kiện toàn màn hình của bài thi này.</Alert> : <div className="table-wrap"><table>
+          <thead><tr><th>Sự kiện</th><th>Thời điểm ghi nhận trên máy</th><th>Máy chủ tiếp nhận</th></tr></thead>
+          <tbody>{data.items.map((event) => <tr key={event.id}>
+            <td><Badge tone={event.type === 'fullscreen_exit' ? 'red' : 'green'}>
+              {event.type === 'fullscreen_exit' ? 'Thoát toàn màn hình' : 'Vào toàn màn hình'}
+            </Badge></td>
+            <td>{formatDateTime(event.clientTime)}</td><td>{formatDateTime(event.receivedAt)}</td>
+          </tr>)}</tbody>
+        </table></div>}
+        {data.total > data.items.length && <span className="muted small">Hiển thị {data.items.length}/{data.total} sự kiện đầu tiên.</span>}
+      </div>}
+    </Modal>
   );
 }
 

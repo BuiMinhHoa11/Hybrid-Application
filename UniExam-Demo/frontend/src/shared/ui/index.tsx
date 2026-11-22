@@ -1,6 +1,16 @@
 import { useEffect, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { ApiError } from '../api';
 
+export function QuestionImage({ src, alt = 'Ảnh minh họa câu hỏi', thumbnail = false }: {
+  src?: string | null;
+  alt?: string;
+  thumbnail?: boolean;
+}) {
+  if (!src) return null;
+  return <img src={src} alt={alt} className={`question-image${thumbnail ? ' thumbnail' : ''}`}
+    loading={thumbnail ? 'lazy' : 'eager'} />;
+}
+
 export function Button({
   variant = 'default',
   small,

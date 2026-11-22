@@ -1,8 +1,11 @@
 import { examApi, publicApi } from '../../shared/api';
 import type { ExamResults, ExamSummary, SessionInfo, SessionPayload, StudentResultItem, SubmissionReview, SubmitResult } from './types';
+import type { FullscreenEvent, SessionEvents } from './types';
 
 /** private-api: phiên làm bài của sinh viên. */
 export const sessionApi = {
+  event: (sessionId: string, event: FullscreenEvent) =>
+    examApi.post<unknown>(`/exam-sessions/${sessionId}/events`, event, { keepalive: true, signal: AbortSignal.timeout(8000) }),
   start: (examId: string) => examApi.post<{ session: SessionInfo; serverTime: string; resumed: boolean }>('/exam-sessions', { examId }),
   get: (sessionId: string) => examApi.get<SessionPayload>(`/exam-sessions/${sessionId}`),
   saveAnswer: (sessionId: string, questionId: string, patch: { selectedOptionIds?: string[]; flagged?: boolean }) =>
@@ -19,6 +22,7 @@ export const studentResultApi = {
 
 /** public-api: kết quả kỳ thi cho giáo viên (UC02D). */
 export const examResultApi = {
+  events: (examId: string, sessionId: string) => publicApi.get<SessionEvents>(`/teacher/exam-results/${examId}/sessions/${sessionId}/events`),
   exams: () => publicApi.get<{ items: ExamSummary[] }>('/teacher/exam-results'),
   results: (examId: string) => publicApi.get<ExamResults>(`/teacher/exam-results/${examId}`),
   submission: (examId: string, submissionId: string) =>

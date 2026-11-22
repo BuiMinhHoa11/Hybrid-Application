@@ -131,9 +131,9 @@ def create_paper(body: PaperInput, db: Session = Depends(get_db, scope="function
         raise AppError(422, "Có câu hỏi không tồn tại hoặc không thuộc ngân hàng của bạn", "UNPROCESSABLE")
     paper = one(db, """INSERT INTO exam_papers(owner_id,title,subject,description)
       VALUES (:owner,:title,:subject,:description) RETURNING *""", owner=user["id"], title=body.title, subject=body.subject, description=body.description.strip())
-    run(db, """INSERT INTO exam_paper_questions(paper_id,question_id,position,type,content,options,correct_option_ids,
+    run(db, """INSERT INTO exam_paper_questions(paper_id,question_id,position,type,content,image_data_url,options,correct_option_ids,
       accepted_answers,points,chapter,topic,difficulty)
-      SELECT :paper,q.id,u.position,q.type,q.content,q.options,q.correct_option_ids,q.accepted_answers,q.points,q.chapter,q.topic,q.difficulty
+      SELECT :paper,q.id,u.position,q.type,q.content,q.image_data_url,q.options,q.correct_option_ids,q.accepted_answers,q.points,q.chapter,q.topic,q.difficulty
       FROM unnest(CAST(:ids AS uuid[])) WITH ORDINALITY AS u(id,position) JOIN questions q ON q.id=u.id""", paper=paper["id"], ids=body.question_ids)
     return paper_detail(db, paper["id"], user)
 
