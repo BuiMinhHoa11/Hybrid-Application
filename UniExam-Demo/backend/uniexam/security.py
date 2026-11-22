@@ -13,7 +13,10 @@ from .db import get_db, one
 from .errors import AppError
 from .common import now_utc
 
-hasher = PasswordHasher()
+# Argon2id theo mức tối thiểu OWASP (m=19 MiB, t=2, p=1). Mặc định của thư viện (64 MiB, t=3)
+# quá nặng cho VM private 1 vCPU chạy lồng trong VirtualBox: đăng nhập mất >20 giây.
+# Hash cũ vẫn kiểm tra được (tham số nằm trong chính chuỗi hash).
+hasher = PasswordHasher(time_cost=2, memory_cost=19456, parallelism=1)
 bearer = HTTPBearer(auto_error=False)
 dummy_hash = hasher.hash("uniexam-dummy-password-not-an-account")
 

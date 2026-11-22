@@ -55,7 +55,7 @@ async def gateway_proxy(request: Request, path: str):
     body = await request.body()
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             upstream = await client.request(request.method, target_url, headers=headers, content=body)
     except httpx.RequestError as exc:
         return JSONResponse(

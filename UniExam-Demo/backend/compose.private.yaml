@@ -45,13 +45,12 @@ services:
     init: true
     pids_limit: 100
     mem_limit: 512m
-    volumes:
-      # Gắn code đã sửa đè lên bản cũ trong image (không cần build lại).
-      # Xóa khối volumes này khi đã build lại image từ code mới.
-      # grading.py: sửa lỗi SQL dòng 88.
-      - /home/ubuntu/Hybrid-Application/UniExam-Demo/backend/uniexam/routers/grading.py:/usr/local/lib/python3.12/site-packages/uniexam/routers/grading.py:ro
-      # Gắn exam_app.py mới: private-api chứa TẤT CẢ router nghiệp vụ (public-api chỉ là gateway).
-      - /home/ubuntu/Hybrid-Application/UniExam-Demo/backend/uniexam/exam_app.py:/usr/local/lib/python3.12/site-packages/uniexam/exam_app.py:ro
+    volumes: &code-mounts
+      # Gắn THẲNG code từ repo đè lên bản trong image (chỉ đọc). Sửa code Python chỉ cần
+      # git pull + docker compose restart, không phải build lại image (build trên VM này rất lâu).
+      # Chỉ khi đổi thư viện (requirements.lock.txt) hoặc Dockerfile mới phải build lại.
+      - /home/ubuntu/Hybrid-Application/UniExam-Demo/backend/uniexam:/usr/local/lib/python3.12/site-packages/uniexam:ro
+      - /home/ubuntu/Hybrid-Application/UniExam-Demo/database/uniexam_database:/usr/local/lib/python3.12/site-packages/uniexam_database:ro
 
   grading-worker:
     image: uniexam-backend:latest
@@ -70,9 +69,7 @@ services:
     init: true
     pids_limit: 100
     mem_limit: 512m
-    volumes:
-      # worker.py: sửa lỗi worker kẹt vì thời gian chờ Redis dài hơn socket_timeout.
-      - /home/ubuntu/Hybrid-Application/UniExam-Demo/backend/uniexam/worker.py:/usr/local/lib/python3.12/site-packages/uniexam/worker.py:ro
+    volumes: *code-mounts
 
 networks:
   uniexam-internal:
