@@ -1,5 +1,0 @@
-# React + FastAPI + PostgreSQL dùng chung dữ liệu.
-# Giữ tên project/volume của bản Python đã chạy để không mất tài khoản.
-name: uniexam-python
-include:
-  - path: ./backend/compose.yaml

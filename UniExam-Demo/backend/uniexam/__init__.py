@@ -1,1 +1,0 @@
-"""UniExam Python backend."""
