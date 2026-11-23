@@ -233,7 +233,7 @@ Sau đó mở `https://uniexam.publicvm.com`, đăng nhập admin, vào **Trạn
 
 Chỉ dùng khi có sự cố. Bình thường bài nộp đi thẳng về private-api và **S3 không có dữ liệu nào**.
 
-- Sinh viên nộp bài (kể cả bài nộp lúc mất mạng) mà private-api không trả lời: gateway trên EC2 **mã hóa AES-256-GCM** bài làm rồi lưu vào `s3://uniexam-submission-442532936214-ap-southeast-2/offline-buffer/`, trả cho sinh viên thông báo "đã nộp, lưu tạm an toàn". Sinh viên có thể đóng trình duyệt.
+- Sinh viên nộp bài (kể cả bài nộp lúc mất mạng) mà private-api không trả lời: gateway trên EC2 **mã hóa AES-256-GCM** bài làm rồi lưu vào `s3://uniexam-submission-442532936214-ap-southeast-2-an/offline-buffer/`, trả cho sinh viên thông báo "đã nộp, lưu tạm an toàn". Sinh viên có thể đóng trình duyệt.
 - Khóa mã hóa (`OFFLINE_BUFFER_KEY`) chỉ nằm trong `.env` của EC2, không nằm trên S3. Trên S3 chỉ có dữ liệu không đọc được.
 - Cứ 30 giây gateway thử chuyển bài về private-api (`/internal/offline-relay`, xác thực bằng `INTERNAL_API_KEY`). Private chạy lại thì bài được ghi vào PostgreSQL, chấm lại, và **xóa khỏi S3**. Mốc thời gian dùng để xét hạn nộp là lúc gateway nhận bài, không phải lúc OpenStack khôi phục.
 - Bài bị private từ chối (đã công bố kết quả, quá hạn...) được chuyển sang `offline-buffer-rejected/` (vẫn mã hóa) để xử lý tay, không mất.
@@ -250,14 +250,14 @@ Chỉ dùng khi có sự cố. Bình thường bài nộp đi thẳng về priva
       "Effect": "Allow",
       "Action": ["s3:PutObject", "s3:GetObject", "s3:DeleteObject"],
       "Resource": [
-        "arn:aws:s3:::uniexam-submission-442532936214-ap-southeast-2/offline-buffer/*",
-        "arn:aws:s3:::uniexam-submission-442532936214-ap-southeast-2/offline-buffer-rejected/*"
+        "arn:aws:s3:::uniexam-submission-442532936214-ap-southeast-2-an/offline-buffer/*",
+        "arn:aws:s3:::uniexam-submission-442532936214-ap-southeast-2-an/offline-buffer-rejected/*"
       ]
     },
     {
       "Effect": "Allow",
       "Action": "s3:ListBucket",
-      "Resource": "arn:aws:s3:::uniexam-submission-442532936214-ap-southeast-2",
+      "Resource": "arn:aws:s3:::uniexam-submission-442532936214-ap-southeast-2-an",
       "Condition": { "StringLike": { "s3:prefix": ["offline-buffer/*"] } }
     }
   ]
@@ -277,7 +277,7 @@ nano .env                        # thêm 3 dòng dưới, dán khóa vào OFFLIN
 ```
 
 ```text
-OFFLINE_BUFFER_BUCKET=uniexam-submission-442532936214-ap-southeast-2
+OFFLINE_BUFFER_BUCKET=uniexam-submission-442532936214-ap-southeast-2-an
 OFFLINE_BUFFER_KEY=<khóa vừa tạo>
 AWS_REGION=ap-southeast-2
 ```
@@ -288,7 +288,7 @@ AWS_REGION=ap-southeast-2
 
 ```bash
 docker compose --env-file .env -f backend/compose.public.yaml up -d --build --wait
-docker compose --env-file .env -f backend/compose.public.yaml exec public-api python -c "import boto3; print('S3_OK', boto3.client('s3').list_objects_v2(Bucket='uniexam-submission-442532936214-ap-southeast-2', Prefix='offline-buffer/')['KeyCount'])"
+docker compose --env-file .env -f backend/compose.public.yaml exec public-api python -c "import boto3; print('S3_OK', boto3.client('s3').list_objects_v2(Bucket='uniexam-submission-442532936214-ap-southeast-2-an', Prefix='offline-buffer/')['KeyCount'])"
 ```
 
    Phải in `S3_OK 0`. Lỗi `AccessDenied` hoặc `NoCredentialsError` thì xem lại bước 1–2.

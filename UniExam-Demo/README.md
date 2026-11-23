@@ -75,7 +75,7 @@ Database chỉ lưu bản băm Argon2 của mật khẩu, không xem lại đư�
 
 ## Chưa có trong bản này
 
-- S3 (`uniexam-submission-442532936214-ap-southeast-2`) và DynamoDB (`uniexam-metadata`) đã tạo trên AWS nhưng code chưa dùng.
+- S3 (`uniexam-submission-442532936214-ap-southeast-2-an`) và DynamoDB (`uniexam-metadata`) đã tạo trên AWS nhưng code chưa dùng.
 - Chưa có script backup PostgreSQL tự động. S3 chỉ dùng để giữ tạm bài nộp (đã mã hóa) khi OpenStack sập, xem README.production.md mục 2.6.
 - Chưa có refresh token, email nhắc trước giờ thi, giám sát thi bằng camera.
 

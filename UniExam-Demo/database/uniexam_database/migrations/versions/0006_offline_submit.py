@@ -11,15 +11,16 @@ def upgrade():
     op.get_bind().exec_driver_sql("""
 -- Thêm lý do nộp 'offline'. Tên ràng buộc cũ có thể khác nhau tùy cách tạo database,
 -- nên tìm theo nội dung: ràng buộc chỉ nói về submit_reason (không đụng ràng buộc có status).
+-- Không dùng ký tự phần trăm: psycopg hiểu nó là chỗ điền tham số và báo lỗi.
 DO $$
 DECLARE c record;
 BEGIN
   FOR c IN SELECT conname FROM pg_constraint
            WHERE conrelid = 'exam_sessions'::regclass AND contype = 'c'
-             AND pg_get_constraintdef(oid) LIKE '%submit_reason%'
-             AND pg_get_constraintdef(oid) NOT LIKE '%status%'
+             AND position('submit_reason' in pg_get_constraintdef(oid)) > 0
+             AND position('status' in pg_get_constraintdef(oid)) = 0
   LOOP
-    EXECUTE format('ALTER TABLE exam_sessions DROP CONSTRAINT %I', c.conname);
+    EXECUTE 'ALTER TABLE exam_sessions DROP CONSTRAINT ' || quote_ident(c.conname);
   END LOOP;
 END $$;
 ALTER TABLE exam_sessions ADD CONSTRAINT exam_sessions_submit_reason_check
