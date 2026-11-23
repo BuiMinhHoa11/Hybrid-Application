@@ -13,17 +13,21 @@ const LABEL: Record<string, string> = {
 
 /** UC03A: trang "Trạng thái hệ thống". */
 export default function SystemStatusPage() {
-  const { data, error, loading, reload } = useAsync(() => adminUserApi.systemStatus(), []);
+  // Có tên bộ đệm: mở lại trang thấy ngay kết quả lần trước, rồi kiểm tra lại ở nền.
+  const { data, error, loading, reload } = useAsync(() => adminUserApi.systemStatus(), [], 'admin:system-status');
 
+  // Tự làm mới mỗi 30 giây, chỉ khi tab đang hiển thị (tránh dồn request lên VM private).
   useEffect(() => {
-    const id = setInterval(reload, 10_000);
+    const id = setInterval(() => {
+      if (document.visibilityState === 'visible') reload();
+    }, 30_000);
     return () => clearInterval(id);
   }, [reload]);
 
   return (
     <>
       <PageHeader title="Trạng thái hệ thống">
-        <Button onClick={reload}>Kiểm tra lại</Button>
+        <Button onClick={reload} disabled={loading}>{loading && data ? 'Đang kiểm tra...' : 'Kiểm tra lại'}</Button>
       </PageHeader>
       <ErrorAlert error={error} />
       {loading && !data ? (
@@ -50,7 +54,7 @@ export default function SystemStatusPage() {
                 </Card>
               ))}
             </div>
-            <p className="muted small">Kiểm tra lúc {formatTime(data.checkedAt)} · tự làm mới mỗi 10 giây</p>
+            <p className="muted small">Kiểm tra lúc {formatTime(data.checkedAt)} · tự làm mới mỗi 30 giây</p>
           </>
         )
       )}

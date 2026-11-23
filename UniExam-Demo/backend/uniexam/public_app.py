@@ -60,8 +60,13 @@ HOP_BY_HOP = {
 
 
 @app.get("/health", tags=["health"])
-async def health():
-    """Gateway sống; kèm trạng thái đường WireGuard tới private-api."""
+async def health(shallow: bool = False):
+    """Gateway sống; kèm trạng thái đường WireGuard tới private-api.
+
+    shallow=1: chỉ báo gateway còn sống (trang Trạng thái hệ thống gọi từ private-api, tránh gọi vòng ngược lại).
+    """
+    if shallow:
+        return {"status": "ok", "service": "public-gateway"}
     private_status = "down"
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:

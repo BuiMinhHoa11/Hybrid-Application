@@ -1,4 +1,6 @@
-from time import perf_counter
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
+from time import monotonic, perf_counter
 from typing import Literal
 from uuid import UUID
 import httpx
@@ -188,18 +190,52 @@ def unlock_user(user_id: UUID, db: Session = Depends(get_db, scope="function"), 
     return set_active(user_id, True, db, actor)
 
 
+STATUS_TIMEOUT_SECONDS = 5.0
+STATUS_CACHE_SECONDS = 5.0
+_status_lock = Lock()
+_status_cache: dict = {"at": 0.0, "value": None}
+
+
+def _probe(name: str, url: str) -> dict:
+    started = perf_counter()
+    detail = None
+    try:
+        response = httpx.get(url, timeout=STATUS_TIMEOUT_SECONDS)
+        status = "up" if response.is_success else "down"
+        if not response.is_success:
+            detail = f"HTTP {response.status_code}"
+    except httpx.TimeoutException:
+        status, detail = "down", f"Quá {STATUS_TIMEOUT_SECONDS:g} giây không phản hồi"
+    except httpx.HTTPError:
+        status, detail = "down", "Không kết nối được"
+    return {"name": name, "status": status, "latencyMs": round((perf_counter() - started) * 1000), "detail": detail}
+
+
 @router.get("/admin/system-status")
 def system_status(db: Session = Depends(get_db, scope="function"), _admin=Depends(admin_user, scope="function")):
+    """Kiểm tra các dịch vụ song song (không lần lượt), mỗi dịch vụ tối đa 5 giây.
+
+    Kết quả được dùng lại trong 5 giây: nhiều tab admin hoặc bấm "Kiểm tra lại" liên tục
+    không làm VM private phải kiểm tra lại từ đầu mỗi lần.
+    """
+    with _status_lock:
+        cached = _status_cache["value"]
+        if cached and monotonic() - _status_cache["at"] < STATUS_CACHE_SECONDS:
+            return cached
     started = perf_counter()
     one(db, "SELECT 1 AS ok")
-    services = [{"name": "database", "status": "up", "latencyMs": round((perf_counter()-started)*1000)}]
-    for name, url in [("public-api", settings.public_api_url), ("private-api", settings.private_api_url),
-                      ("grading-worker", settings.worker_url), ("frontend", settings.frontend_url)]:
-        started = perf_counter()
-        try:
-            response = httpx.get(f"{url}/health", timeout=2)
-            status = "up" if response.is_success else "down"
-        except httpx.HTTPError:
-            status = "down"
-        services.append({"name": name, "status": status, "latencyMs": round((perf_counter()-started)*1000)})
-    return {"overall": "ok" if all(s["status"] == "up" for s in services) else "degraded", "checkedAt": now_utc().isoformat(), "services": services}
+    database = {"name": "database", "status": "up", "latencyMs": round((perf_counter() - started) * 1000), "detail": None}
+    # private-api: chính tiến trình đang trả lời request này nên chắc chắn đang chạy, không cần tự gọi mình.
+    private = {"name": "private-api", "status": "up", "latencyMs": 0, "detail": None}
+    # public-api: ?shallow=1 để gateway trả lời ngay, không vòng ngược lại gọi private-api.
+    targets = [("public-api", f"{settings.public_api_url.rstrip('/')}/health?shallow=1"),
+               ("grading-worker", f"{settings.worker_url.rstrip('/')}/health"),
+               ("frontend", f"{settings.frontend_url.rstrip('/')}/health")]
+    with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+        probed = list(pool.map(lambda target: _probe(*target), targets))
+    services = [database, private, *probed]
+    value = {"overall": "ok" if all(s["status"] == "up" for s in services) else "degraded",
+             "checkedAt": now_utc().isoformat(), "services": services}
+    with _status_lock:
+        _status_cache.update(at=monotonic(), value=value)
+    return value
