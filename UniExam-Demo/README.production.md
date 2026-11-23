@@ -120,9 +120,19 @@ docker compose -f backend/compose.private.yaml exec private-api python -m uniexa
 
 Xem tình trạng gửi: `SELECT status, count(*) FROM email_notifications GROUP BY status;` (`failed` có lý do ở cột `last_error`).
 
-### 1.9 Giữ đáp án khi mất mạng
+### 1.9 Làm bài và nộp bài khi mất mạng
 
-Không cần cấu hình. Khi sinh viên mất mạng hoặc không gọi được private-api, đáp án chưa gửi được giữ trong `localStorage` của trình duyệt (kể cả khi tải lại trang), và tự gửi lên khi kết nối lại. Phòng thi cũng mở lại được từ bản sao đề trên máy. Giới hạn: sinh viên phải dùng lại đúng trình duyệt đó, và chỉ nộp được khi đã có kết nối trước giờ hết hạn.
+Không cần cấu hình thêm (migration `0006_offline_submit`, áp bằng `init-db`).
+
+- Mất mạng giữa giờ thi: sinh viên vẫn làm tiếp; đề và đáp án giữ trong `localStorage` (tải lại trang vẫn còn). Có mạng lại thì đáp án tự gửi lên.
+- Bấm **Nộp bài** hoặc **hết giờ** khi vẫn mất mạng: máy **khóa bài** (không sửa được nữa) và tự gửi **toàn bộ bài** khi có mạng lại, kể cả sau giờ hết hạn. Server thay bài đã bị tự nộp lúc hết giờ bằng bài đầy đủ này rồi chấm lại.
+- Server nhận bài gửi muộn tối đa `OFFLINE_SUBMIT_GRACE_MINUTES` phút sau giờ hết hạn (mặc định 30; đặt trong `.env`, `0` = tắt). Trong khoảng đó, nếu kỳ thi có bài bị tự nộp do hết giờ thì giáo viên chưa công bố được kết quả, để không bỏ sót bài của người đang mất mạng.
+- Giáo viên thấy nhãn **Nộp ngoại tuyến** ở trang kết quả, kèm thời gian mất kết nối và số phút gửi trễ, để soát lại khi cần.
+- Giới hạn: sinh viên phải quay lại **đúng máy, đúng trình duyệt** (không xóa dữ liệu trình duyệt, không dùng cửa sổ ẩn danh rồi đóng). Thời gian làm bài lúc mất mạng do đồng hồ trên máy tính, nên giáo viên cần soát các bài có nhãn trên.
+
+### 1.10 Cảnh báo thoát toàn màn hình cho quản trị viên
+
+Migration `0005_admin_exam_alerts` (áp bằng `init-db`). Admin đang mở web nhận thông báo nổi khi sinh viên thoát toàn màn hình; mục **Cảnh báo** liệt kê ai đang ở ngoài toàn màn hình và lịch sử 50 cảnh báo gần nhất. Luồng dữ liệu là SSE qua `/api/admin/exam-alerts/stream`, nên Nginx trên EC2 phải tắt buffering cho đường dẫn này (mục 2.4).
 
 ## 2. uniexam-public (AWS EC2)
 
@@ -161,11 +171,26 @@ docker compose --env-file .env -f backend/compose.public.yaml up -d --build --wa
 
 ```bash
 sudo apt install -y nginx certbot python3-certbot-nginx
+# Luồng cảnh báo admin (SSE): phải tắt buffering, nếu không cảnh báo bị giữ lại không tới ngay.
+sudo tee /etc/nginx/snippets/uniexam-sse.conf >/dev/null <<'NGINX'
+location = /api/admin/exam-alerts/stream {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 60s;
+}
+NGINX
 sudo tee /etc/nginx/sites-available/uniexam >/dev/null <<'NGINX'
 server {
     listen 80;
     server_name uniexam.publicvm.com;
     client_max_body_size 10m;
+    include snippets/uniexam-sse.conf;
     location / {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host $host;
@@ -180,6 +205,14 @@ sudo ln -sf /etc/nginx/sites-available/uniexam /etc/nginx/sites-enabled/uniexam
 sudo rm -f /etc/nginx/sites-enabled/default
 sudo nginx -t && sudo systemctl reload nginx
 sudo certbot --nginx -d uniexam.publicvm.com
+```
+
+Máy đã cài từ trước (file đã được certbot sửa): tạo file `snippets/uniexam-sse.conf` như trên, rồi thêm dòng `include` vào trước mọi `location / {`:
+
+```bash
+grep -q uniexam-sse /etc/nginx/sites-available/uniexam || \
+  sudo sed -i 's#^\(\s*\)location / {#\1include snippets/uniexam-sse.conf;\n\1location / {#' /etc/nginx/sites-available/uniexam
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 ### 2.5 Kiểm tra

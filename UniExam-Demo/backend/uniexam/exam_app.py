@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager, suppress
 from .app_factory import create_app
 from .config import settings
 from .db import SessionLocal
-from .routers import accounts, questions, papers, exams, results, sessions, grading
+from .routers import accounts, questions, papers, exams, results, sessions, grading, admin_alerts
 
 
 def tick_once():
@@ -49,6 +49,6 @@ async def lifespan(_app):
 app = create_app("private-api", lifespan=lifespan)
 
 # TẤT CẢ ROUTERS NGHIỆP VỤ NẰM TRỌN VẸN Ở PRIVATE-API (NỘI BỘ PRIVATE CLOUD)
-for routes in [accounts, questions, papers, exams, results, sessions, grading]:
+for routes in [accounts, questions, papers, exams, results, sessions, grading, admin_alerts]:
     app.include_router(routes.router)
 

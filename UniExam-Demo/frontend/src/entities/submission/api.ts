@@ -1,5 +1,5 @@
 import { examApi, publicApi } from '../../shared/api';
-import type { ExamResults, ExamSummary, SessionInfo, SessionPayload, StudentResultItem, SubmissionReview, SubmitResult } from './types';
+import type { ExamResults, ExamSummary, OfflineSubmission, SessionInfo, SessionPayload, StudentResultItem, SubmissionReview, SubmitResult } from './types';
 import type { FullscreenEvent, SessionEvents } from './types';
 
 /** private-api: phiên làm bài của sinh viên. */
@@ -10,7 +10,10 @@ export const sessionApi = {
   get: (sessionId: string) => examApi.get<SessionPayload>(`/exam-sessions/${sessionId}`),
   saveAnswer: (sessionId: string, questionId: string, patch: { selectedOptionIds?: string[]; flagged?: boolean }) =>
     examApi.put<unknown>(`/exam-sessions/${sessionId}/answers/${questionId}`, patch),
-  submit: (sessionId: string) => examApi.post<SubmitResult>(`/exam-sessions/${sessionId}/submit`)
+  submit: (sessionId: string) => examApi.post<SubmitResult>(`/exam-sessions/${sessionId}/submit`),
+  offlineSubmit: (sessionId: string, body: OfflineSubmission) =>
+    examApi.post<{ session: SessionInfo; alreadySubmitted: boolean }>(`/exam-sessions/${sessionId}/offline-submit`, body,
+      { signal: AbortSignal.timeout(60_000) })
 };
 
 /** public-api: kết quả của sinh viên (UC01D). */

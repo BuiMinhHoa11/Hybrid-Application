@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     email_poll_seconds: float = Field(default=10, gt=0)
     # Khoảng nghỉ giữa hai email; Amazon SES sandbox chỉ cho 1 email/giây nên đặt 1.1
     email_send_interval_seconds: float = Field(default=0, ge=0, le=60)
+    # Sinh viên mất mạng vẫn làm hết bài; máy tự gửi bài khi có mạng lại. Nhận bài gửi muộn tối đa
+    # bấy nhiêu phút sau giờ hết hạn (0 = tắt). Trong khoảng này giáo viên chưa công bố được kết quả
+    # nếu có bài bị tự nộp do hết giờ, để không bỏ sót bài của thí sinh đang mất mạng.
+    offline_submit_grace_minutes: int = Field(default=30, ge=0, le=1440)
 
     @model_validator(mode="after")
     def secure_production(self):

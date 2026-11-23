@@ -10,14 +10,14 @@ const SAVE_LABEL: Record<SaveStatus, string> = {
   idle: '',
   saving: 'Đang lưu...',
   saved: '✓ Đã lưu',
-  error: '⚠ Có đáp án chưa lưu lên máy chủ (đang giữ trên máy này và tự gửi lại). Kiểm tra kết nối trước khi nộp.'
+  error: '⚠ Mất kết nối: đáp án đang được giữ trên máy này và tự gửi lên khi có mạng. Vẫn nộp bài được.'
 };
 
 /** UC01B: làm bài; UC01C: nộp bài. */
 export default function ExamRoomPage() {
   const { sessionId = '' } = useParams();
   const room = useExamSession(sessionId);
-  const fullscreen = useExamFullscreen(sessionId, room.payload?.session.status === 'in_progress' && !room.expired,
+  const fullscreen = useExamFullscreen(sessionId, room.payload?.session.status === 'in_progress' && !room.expired && !room.sealed,
     room.payload?.session.expiresAt, room.offsetMs);
   const [current, setCurrent] = useState(0);
   const [confirming, setConfirming] = useState(false);
@@ -25,17 +25,48 @@ export default function ExamRoomPage() {
   const [submitError, setSubmitError] = useState<unknown>();
 
   const inProgress = room.payload?.session.status === 'in_progress' && !room.expired;
+  const waitingToSend = !!room.sealed && !room.sealed.failedMessage;
 
-  // Cảnh báo khi vô tình đóng/tải lại trang lúc đang làm bài.
+  // Cảnh báo khi vô tình đóng/tải lại trang lúc đang làm bài hoặc bài chưa gửi được lên máy chủ.
   useEffect(() => {
-    if (!inProgress) return;
+    if (!inProgress && !waitingToSend) return;
     const warn = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = '';
     };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [inProgress]);
+  }, [inProgress, waitingToSend]);
+
+  if (room.sealed) {
+    const sealed = room.sealed;
+    const answered = sealed.answers.filter((a) => a.selectedOptionIds.length > 0).length;
+    return (
+      <div className="container">
+        <Card>
+          <div className="stack">
+            <h1>{room.payload?.exam.title ?? sealed.examTitle ?? 'Bài thi'}</h1>
+            {sealed.failedMessage ? (
+              <Alert>Máy chủ không nhận bài nộp này: {sealed.failedMessage} Bài làm vẫn đang được giữ trên máy này.</Alert>
+            ) : (
+              <>
+                <Alert kind="info">
+                  Đã khóa bài làm lúc {new Date(sealed.sealedAt).toLocaleTimeString('vi-VN')} ({answered} câu đã trả lời).
+                  Đang mất kết nối tới máy chủ nên bài được giữ trên máy này và <strong>tự gửi lên khi có mạng lại</strong>.
+                </Alert>
+                <Alert>
+                  Không xóa dữ liệu trình duyệt, không đổi sang máy khác, không đóng cửa sổ ẩn danh cho tới khi thấy
+                  thông báo nộp bài thành công. Nếu lỡ đóng trang, mở lại UniExam trên máy này để bài tự gửi tiếp.
+                </Alert>
+                <Spinner label={room.sending ? 'Đang gửi bài lên máy chủ...' : 'Đang chờ có mạng để gửi bài...'} />
+              </>
+            )}
+            <Link to="/student/exams">Về danh sách kỳ thi</Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   if (room.loading && !room.payload) return <Spinner label="Đang tải đề thi..." />;
   if (room.error || !room.payload) {
@@ -52,14 +83,16 @@ export default function ExamRoomPage() {
   const { payload } = room;
 
   if (payload.session.status === 'submitted') {
-    const timeout = payload.session.submitReason === 'timeout';
+    const reason = payload.session.submitReason;
     return (
       <div className="container">
         <Card>
           <div className="stack">
             <h1>{payload.exam.title}</h1>
-            {timeout ? (
+            {reason === 'timeout' ? (
               <Alert kind="info">Đã hết giờ làm bài. Hệ thống đã khóa bài và tự động nộp các đáp án bạn đã lưu.</Alert>
+            ) : reason === 'offline' ? (
+              <Alert kind="success">Đã gửi xong bài làm lúc mất kết nối. Bài của bạn đang ở trạng thái chờ chấm.</Alert>
             ) : (
               <Alert kind="success">Nộp bài thành công. Bài của bạn đang ở trạng thái chờ chấm.</Alert>
             )}
@@ -129,8 +162,8 @@ export default function ExamRoomPage() {
       {fullscreen.logError && <Alert>{fullscreen.logError}</Alert>}
       {room.offline && (
         <Alert>
-          Đang mất kết nối tới máy chủ. Bạn vẫn làm bài bình thường: đáp án được giữ trên máy này và tự gửi lên khi
-          kết nối lại. Đừng xóa dữ liệu trình duyệt; chỉ bấm Nộp bài khi đã có kết nối.
+          Đang mất kết nối tới máy chủ. Bạn vẫn làm bài và nộp bài bình thường: bài làm được giữ trên máy này và tự gửi
+          lên khi có mạng lại. Đừng xóa dữ liệu trình duyệt và đừng đổi sang máy khác.
         </Alert>
       )}
       <div className="room-top">

@@ -3,6 +3,8 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../shared/auth';
 import { roleLabel } from '../shared/lib';
 import { Button } from '../shared/ui';
+import { AdminExamAlertsProvider, useAdminAlerts } from '../features/admin-exam-alerts';
+import { useOfflineSubmissionSync } from '../features/exam-taking';
 
 const NAV: Record<Role, Array<{ to: string; label: string }>> = {
   student: [
@@ -17,12 +19,24 @@ const NAV: Record<Role, Array<{ to: string; label: string }>> = {
   ],
   admin: [
     { to: '/admin/accounts', label: 'Quản lý tài khoản' },
-    { to: '/admin/system-status', label: 'Trạng thái hệ thống' }
+    { to: '/admin/system-status', label: 'Trạng thái hệ thống' },
+    { to: '/admin/exam-alerts', label: 'Cảnh báo' }
   ]
 };
 
 export function Layout() {
+  const { user } = useAuth();
+  // Sinh viên còn bài nộp lúc mất mạng chưa gửi được: tự gửi khi đang ở bất kỳ trang nào.
+  useOfflineSubmissionSync(user?.role === 'student');
+  if (!user) return null;
+  return user.role === 'admin'
+    ? <AdminExamAlertsProvider key={user.id}><LayoutContent /></AdminExamAlertsProvider>
+    : <LayoutContent />;
+}
+
+function LayoutContent() {
   const { user, logout } = useAuth();
+  const alerts = useAdminAlerts();
   if (!user) return null;
   return (
     <>
@@ -33,6 +47,7 @@ export function Layout() {
             {NAV[user.role].map((item) => (
               <NavLink key={item.to} to={item.to} className={({ isActive }) => (isActive ? 'active' : '')}>
                 {item.label}
+                {item.to === '/admin/exam-alerts' && !!alerts?.snapshot.activeSessions.length && <span className="badge red" style={{ marginLeft: 6 }}>{alerts.snapshot.activeSessions.length}</span>}
               </NavLink>
             ))}
           </nav>

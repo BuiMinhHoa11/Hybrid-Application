@@ -30,6 +30,7 @@ x-env: &env
   MAIL_FROM: ${MAIL_FROM:-UniExam <no-reply@localhost>}
   APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://uniexam.publicvm.com}
   EMAIL_SEND_INTERVAL_SECONDS: ${EMAIL_SEND_INTERVAL_SECONDS:-0}
+  OFFLINE_SUBMIT_GRACE_MINUTES: ${OFFLINE_SUBMIT_GRACE_MINUTES:-30}
 
 # Healthcheck của Docker đang TẮT vì VM quá chậm (healthcheck bị treo chồng chất).
 # Giám sát bằng script /srv/uniexam/healthcheck.sh (curl từ bên ngoài, chạy bằng cron).

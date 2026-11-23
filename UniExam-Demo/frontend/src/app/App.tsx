@@ -3,6 +3,7 @@ import { useAuth } from '../shared/auth';
 import { Spinner } from '../shared/ui';
 import AccountsPage from '../pages/admin/accounts';
 import SystemStatusPage from '../pages/admin/system-status';
+import ExamAlertsPage from '../pages/admin/exam-alerts';
 import LoginPage from '../pages/login';
 import ExamDetailPage from '../pages/student/exam-detail';
 import ExamListPage from '../pages/student/exam-list';
@@ -76,6 +77,7 @@ export function App() {
       >
         <Route path="accounts" element={<AccountsPage />} />
         <Route path="system-status" element={<SystemStatusPage />} />
+        <Route path="exam-alerts" element={<ExamAlertsPage />} />
       </Route>
 
       <Route path="*" element={<Home />} />

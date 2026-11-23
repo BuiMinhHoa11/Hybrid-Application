@@ -8,8 +8,10 @@ from pydantic import AwareDatetime, Field, model_validator
 from sqlalchemy.orm import Session
 
 from uniexam.common import Schema, dto, dump_json, now_utc
+from uniexam.config import settings
 from uniexam.db import get_db, many, one, run
 from uniexam.grading_queue import enqueue
+from uniexam.routers.grading import MAX_ATTEMPTS as MAX_GRADING_ATTEMPTS
 from uniexam.errors import AppError
 from uniexam.security import student_user
 
@@ -45,6 +47,44 @@ class AnswerPatch(Schema):
         if "selected_option_ids" in self.model_fields_set and "text_answer" in self.model_fields_set:
             raise ValueError("Chỉ gửi selectedOptionIds hoặc textAnswer")
         return self
+
+
+class OfflineAnswer(Schema):
+    question_id: UUID
+    # Như khi tự lưu: trắc nghiệm là mã lựa chọn, điền chỗ trống là [câu trả lời] hoặc [].
+    selected_option_ids: list[str] = Field(default_factory=list, max_length=8)
+    flagged: bool = False
+
+    @model_validator(mode="after")
+    def valid_values(self):
+        if any(not value or len(value) > 500 for value in self.selected_option_ids):
+            raise ValueError("Câu trả lời không hợp lệ")
+        return self
+
+
+class OfflineSubmit(Schema):
+    """Toàn bộ bài làm giữ trên máy sinh viên, gửi lên một lần khi có mạng lại."""
+    answers: list[OfflineAnswer] = Field(max_length=500)
+    # Giờ trên máy sinh viên: chỉ để giáo viên tham khảo, server không dùng làm mốc chấm.
+    sealed_at: AwareDatetime
+    offline_seconds: int = Field(default=0, ge=0, le=7 * 24 * 3600)
+
+
+def normalize_answer(question: dict, selected_option_ids: list[str] | None, text_answer: str | None = None,
+                     text_given: bool = False) -> tuple[list[str], str | None]:
+    """Kiểm tra câu trả lời theo loại câu hỏi; trả về (mã lựa chọn, câu trả lời điền chỗ trống)."""
+    if question["type"] == "fill_blank":
+        if selected_option_ids is not None and len(selected_option_ids) > 1:
+            raise AppError(422, "Chỉ nhập một câu trả lời cho chỗ trống", "UNPROCESSABLE")
+        value = text_answer if text_given else next(iter(selected_option_ids or []), None)
+        return [], (value if value is not None and value.strip() else None)
+    if text_answer is not None:
+        raise AppError(422, "Câu trắc nghiệm phải trả lời bằng mã lựa chọn", "UNPROCESSABLE")
+    selected = list(dict.fromkeys(selected_option_ids or []))
+    valid = {option["id"] for option in question["options"]}
+    if any(option not in valid for option in selected):
+        raise AppError(422, "Lựa chọn không hợp lệ cho câu hỏi này", "UNPROCESSABLE")
+    return selected, None
 
 
 def session_dto(row: dict):
@@ -176,19 +216,8 @@ def save_answer(session_id: UUID, question_id: UUID, body: AnswerPatch, db: DB, 
     has_answer = bool({"text_answer", "selected_option_ids"} & body.model_fields_set)
     selected, text_answer = [], None
     if has_answer:
-        if question["type"] == "fill_blank":
-            if body.selected_option_ids is not None and len(body.selected_option_ids) > 1:
-                raise AppError(422, "Chỉ nhập một câu trả lời cho chỗ trống", "UNPROCESSABLE")
-            text_answer = body.text_answer if "text_answer" in body.model_fields_set else next(iter(body.selected_option_ids or []), None)
-            if text_answer is not None and not text_answer.strip():
-                text_answer = None
-        else:
-            if body.text_answer is not None:
-                raise AppError(422, "Câu trắc nghiệm phải trả lời bằng mã lựa chọn", "UNPROCESSABLE")
-            selected = list(dict.fromkeys(body.selected_option_ids or []))
-            valid = {option["id"] for option in question["options"]}
-            if any(option not in valid for option in selected):
-                raise AppError(422, "Lựa chọn không hợp lệ cho câu hỏi này", "UNPROCESSABLE")
+        selected, text_answer = normalize_answer(question, body.selected_option_ids, body.text_answer,
+                                                 "text_answer" in body.model_fields_set)
     saved = one(db, """INSERT INTO answers(session_id, paper_id, question_id, selected_option_ids, text_answer, flagged)
         SELECT :session, :paper, :question, CAST(:selected AS text[]), :text_answer, COALESCE(:flagged, false)
         FROM exam_sessions ss WHERE ss.id = :session AND ss.expires_at > clock_timestamp()
@@ -213,6 +242,72 @@ def submit_session(session_id: UUID, db: DB, user: Student):
     session = owned_session(db, session_id, user)
     reason = "timeout" if session["expires_at"] <= now_utc() else "student"
     return finalize_session(db, session_id, reason)
+
+
+@router.post("/exam-sessions/{session_id}/offline-submit")
+def offline_submit(session_id: UUID, body: OfflineSubmit, db: DB, user: Student):
+    """Nhận bài làm đầy đủ từ máy sinh viên đã mất mạng (kể cả sau giờ hết hạn, trong thời gian cho phép).
+
+    - Phiên còn mở: ghi đáp án rồi nộp.
+    - Phiên đã bị hệ thống tự nộp do hết giờ: thay bằng bài đầy đủ này và chấm lại.
+    - Phiên đã nộp bình thường hoặc đã nhận bài ngoại tuyến (gửi lại do mất phản hồi): giữ nguyên.
+    """
+    # Khóa kỳ thi trước, phiên sau: cùng thứ tự với lúc bắt đầu làm bài và công bố kết quả.
+    head = one(db, "SELECT exam_id, student_id FROM exam_sessions WHERE id = :id", id=session_id)
+    if not head or head["student_id"] != user["id"]:
+        raise AppError(404, "Không tìm thấy phiên làm bài", "NOT_FOUND")
+    exam = one(db, "SELECT results_published FROM exams WHERE id = :id FOR SHARE", id=head["exam_id"])
+    session = owned_session(db, session_id, user)
+    if session["status"] == "submitted" and session["submit_reason"] != "timeout":
+        return {"session": session_dto(session), "alreadySubmitted": True}
+    if exam["results_published"]:
+        raise AppError(409, "Giáo viên đã công bố kết quả nên hệ thống không nhận bài gửi muộn. Hãy liên hệ giáo viên.",
+                       "RESULTS_PUBLISHED")
+    now = now_utc()
+    if now > session["expires_at"] + timedelta(minutes=settings.offline_submit_grace_minutes):
+        raise AppError(409, "Đã quá thời hạn nhận bài gửi muộn. Hãy liên hệ giáo viên.", "OFFLINE_SYNC_EXPIRED")
+
+    questions = {row["id"]: row for row in many(db, "SELECT id, type, options FROM exam_paper_questions WHERE paper_id = :paper",
+                                                paper=session["paper_id"])}
+    rows, seen = [], set()
+    for item in body.answers:
+        question = questions.get(item.question_id)
+        if not question:
+            raise AppError(404, "Câu hỏi không thuộc đề thi của bạn", "NOT_FOUND")
+        if item.question_id in seen:
+            raise AppError(422, "Một câu hỏi bị gửi hai lần", "UNPROCESSABLE")
+        seen.add(item.question_id)
+        selected, text_answer = normalize_answer(question, item.selected_option_ids)
+        rows.append({"question": item.question_id, "selected": selected, "text_answer": text_answer, "flagged": item.flagged})
+    # Bản trên máy sinh viên là bản mới nhất: ghi đè lên các câu đã lưu trước đó.
+    for row in rows:
+        run(db, """INSERT INTO answers(session_id, paper_id, question_id, selected_option_ids, text_answer, flagged)
+            VALUES (:session, :paper, :question, CAST(:selected AS text[]), :text_answer, :flagged)
+            ON CONFLICT (session_id, question_id) DO UPDATE SET selected_option_ids = EXCLUDED.selected_option_ids,
+              text_answer = EXCLUDED.text_answer, flagged = EXCLUDED.flagged""",
+            session=session_id, paper=session["paper_id"], **row)
+
+    if session["status"] == "in_progress":
+        finalize_session(db, session_id, "offline")
+    else:
+        # Đã bị tự nộp lúc hết giờ với đáp án cũ: thay bằng bài đầy đủ và đưa vào hàng chấm lại.
+        snapshot = many(db, """SELECT question_id, selected_option_ids, text_answer
+            FROM answers WHERE session_id = :id ORDER BY question_id""", id=session_id)
+        sub = one(db, "SELECT id FROM submissions WHERE session_id = :id FOR UPDATE", id=session_id)
+        if not sub:
+            raise AppError(409, "Phiên đã nộp nhưng thiếu bản ghi bài nộp", "BAD_STATE")
+        run(db, "UPDATE exam_sessions SET submit_reason = 'offline' WHERE id = :id", id=session_id)
+        run(db, "DELETE FROM grading_results WHERE submission_id = :id", id=sub["id"])
+        # Giữ số lượt chấm (không về 0) để chữ ký của lượt chấm cũ đang chạy không trùng lượt mới.
+        run(db, """UPDATE submissions SET answers_snapshot = CAST(:answers AS jsonb), status = 'pending_grading',
+            claimed_at = NULL, graded_at = NULL, fail_reason = NULL, attempts = LEAST(attempts, :max_attempts)
+            WHERE id = :id""", answers=dump_json(snapshot), max_attempts=MAX_GRADING_ATTEMPTS - 1, id=sub["id"])
+        enqueue(str(sub["id"]))
+    run(db, """UPDATE submissions SET offline_synced_at = clock_timestamp(), offline_seconds = :offline,
+        offline_late_seconds = :late WHERE session_id = :id""",
+        offline=body.offline_seconds, late=max(0, int((now - session["expires_at"]).total_seconds())), id=session_id)
+    return {"session": session_dto(one(db, "SELECT * FROM exam_sessions WHERE id = :id", id=session_id)),
+            "alreadySubmitted": False}
 
 
 @router.post("/exam-sessions/{session_id}/events", status_code=201)
@@ -240,4 +335,8 @@ def record_fullscreen_event(session_id: UUID, body: FullscreenEvent, db: DB, use
         if saved["session_id"] != session_id or saved["type"] != body.type or saved["client_time"] != body.client_time:
             raise AppError(409, "Mã sự kiện đã được sử dụng", "EVENT_CONFLICT")
         response.status_code = 200
+    if body.type == "fullscreen_exit":
+        # Commit the alert atomically with the event; UUID retries cannot create duplicates.
+        run(db, """INSERT INTO admin_exam_alerts(event_id) VALUES (:event)
+            ON CONFLICT(event_id) DO NOTHING""", event=body.id)
     return dto(saved)

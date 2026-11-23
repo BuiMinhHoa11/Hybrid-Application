@@ -12,6 +12,7 @@ from uniexam.common import Schema, dto, now_utc
 from uniexam.db import get_db, many, one
 from uniexam.errors import AppError
 from uniexam.security import require_owned, student_user, teacher_user
+from uniexam.config import settings
 from uniexam.services.results_policy import publication_policy
 
 
@@ -41,8 +42,11 @@ def publication_state(db: Session, exam_id: UUID) -> dict[str, Any]:
            JOIN submissions sub ON sub.session_id = ss.id WHERE a.exam_id = :exam_id) AS submitted,
           (SELECT count(*)::int FROM exam_sessions WHERE exam_id = :exam_id AND status = 'in_progress') AS open_sessions,
           (SELECT count(*)::int FROM submissions sub LEFT JOIN grading_results gr ON gr.submission_id = sub.id
-           WHERE sub.exam_id = :exam_id AND (sub.status <> 'graded' OR gr.id IS NULL)) AS ungraded""",
-        exam_id=exam_id,
+           WHERE sub.exam_id = :exam_id AND (sub.status <> 'graded' OR gr.id IS NULL)) AS ungraded,
+          -- Bài bị tự nộp do hết giờ có thể còn bài đầy đủ đang chờ gửi từ máy mất mạng.
+          (SELECT max(expires_at) + make_interval(mins => :grace) FROM exam_sessions
+           WHERE exam_id = :exam_id AND status = 'submitted' AND submit_reason = 'timeout') AS offline_wait_until""",
+        exam_id=exam_id, grace=settings.offline_submit_grace_minutes,
     )
 
 
@@ -134,7 +138,8 @@ def exam_results(exam_id: UUID, db: Session = Depends(get_db, scope="function"),
         """SELECT u.id AS student_id, u.username, u.full_name,
           ss.id AS session_id, ss.status AS session_status, ss.started_at, sub.id AS submission_id,
           (SELECT count(*)::int FROM exam_session_events ev WHERE ev.session_id=ss.id AND ev.type='fullscreen_exit') AS fullscreen_exit_count,
-          sub.status AS submission_status, sub.submitted_at, ss.submit_reason, gr.score, gr.max_score
+          sub.status AS submission_status, sub.submitted_at, ss.submit_reason, gr.score, gr.max_score,
+          sub.offline_synced_at, sub.offline_seconds, sub.offline_late_seconds
           FROM exam_audience a JOIN users u ON u.id = a.student_id
           LEFT JOIN exam_sessions ss ON ss.exam_id = a.exam_id AND ss.student_id = a.student_id
           LEFT JOIN submissions sub ON sub.session_id = ss.id

@@ -38,6 +38,14 @@ a:hover { text-decoration: underline; }
 .nav a:hover { background: var(--bg); text-decoration: none; }
 .nav a.active { background: #e6edff; color: var(--primary); font-weight: 600; }
 .container { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; }
+.exam-alert-tabs { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+.exam-alert-tabs button { font: inherit; border: 0; border-radius: 8px; padding: 10px 14px; background: var(--bg); cursor: pointer; color: var(--muted); }
+.exam-alert-tabs button[aria-selected='true'] { background: #e6edff; color: var(--primary); font-weight: 600; }
+.row input.exam-alert-search { width: min(420px, 100%); }
+.exam-alert-unread { background: #fff6f6; }
+.admin-alert-toast { position: fixed; bottom: 24px; right: 24px; width: min(420px, calc(100vw - 32px)); padding: 16px; background: var(--surface); border: 1px solid #f4b6bb; border-left: 5px solid var(--danger); border-radius: var(--radius); box-shadow: 0 12px 40px #1c233326; z-index: 110; overflow-wrap: anywhere; }
+.admin-alert-toast p { margin: 10px 0; }
+.admin-alert-toast > .btn { margin-top: 10px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
 
 /* Components */

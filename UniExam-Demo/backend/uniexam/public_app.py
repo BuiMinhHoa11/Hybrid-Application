@@ -5,9 +5,10 @@ qua WireGuard tới private-api (PRIVATE_API_URL, mặc định http://10.200.0.
 private-api tự kiểm tra JWT và phân quyền.
 """
 import httpx
+import anyio
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from .config import settings
 
@@ -43,6 +44,43 @@ async def health():
         "service": "public-gateway",
         "checks": {"private-api": private_status},
     }
+
+
+@app.get("/admin/exam-alerts/stream")
+async def admin_alert_stream_proxy(request: Request):
+    # Forward the Bearer header to private-api; never put admin tokens in URLs.
+    client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=40.0))
+    headers = {k: v for k, v in request.headers.items() if k.lower() not in HOP_BY_HOP}
+    upstream = None
+    try:
+        upstream = await client.send(client.build_request("GET",
+            f"{settings.private_api_url.rstrip('/')}/admin/exam-alerts/stream", headers=headers), stream=True)
+        if upstream.status_code != 200:
+            content = await upstream.aread()
+            status, content_type = upstream.status_code, upstream.headers.get("content-type", "application/json")
+            await upstream.aclose()
+            await client.aclose()
+            return Response(content, status_code=status, headers={"Content-Type": content_type, "Cache-Control": "no-store"})
+    except httpx.HTTPError:
+        if upstream is not None:
+            await upstream.aclose()
+        await client.aclose()
+        return JSONResponse(status_code=502, content={"error": {"code": "PRIVATE_API_UNREACHABLE",
+            "message": "Không kết nối được luồng cảnh báo quản trị"}})
+
+    async def forward():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                yield chunk
+        except httpx.HTTPError:
+            yield 'event: unavailable\ndata: {}\n\n'
+        finally:
+            with anyio.CancelScope(shield=True):
+                await upstream.aclose()
+                await client.aclose()
+
+    return StreamingResponse(forward(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache, no-store", "X-Accel-Buffering": "no"})
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])

@@ -145,6 +145,15 @@ function ResultsOfExam({ examId }: { examId: string }) {
                   <td>
                     {formatDateTime(r.submittedAt)}
                     {r.submitReason === 'timeout' && <div className="muted small">Hết giờ, hệ thống tự nộp</div>}
+                    {r.submitReason === 'offline' && (
+                      <div className="small">
+                        <Badge tone="amber">Nộp ngoại tuyến</Badge>
+                        <div className="muted">
+                          Mất kết nối khoảng {Math.round((r.offlineSeconds ?? 0) / 60)} phút
+                          {(r.offlineLateSeconds ?? 0) > 0 ? ` · gửi tới máy chủ trễ ${Math.ceil((r.offlineLateSeconds ?? 0) / 60)} phút sau giờ hết hạn` : ''}
+                        </div>
+                      </div>
+                    )}
                   </td>
                   <td>
                     {r.submissionStatus ? (

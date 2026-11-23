@@ -7,7 +7,8 @@ export interface SessionInfo {
   startedAt: string;
   expiresAt: string;
   submittedAt: string | null;
-  submitReason: 'student' | 'timeout' | null;
+  /** offline: bài làm khi mất mạng, máy tự gửi lên sau khi có mạng lại. */
+  submitReason: 'student' | 'timeout' | 'offline' | null;
 }
 
 export interface SessionQuestion {
@@ -33,6 +34,14 @@ export interface SessionPayload {
   exam: { id: string; title: string; subject: string; durationMinutes: number };
   questions: SessionQuestion[];
   answers: Record<string, SavedAnswer>;
+}
+
+/** Bài làm giữ trên máy khi mất mạng, gửi lên một lần khi có mạng lại. */
+export interface OfflineSubmission {
+  answers: Array<{ questionId: string; selectedOptionIds: string[]; flagged: boolean }>;
+  /** Giờ trên máy (đã bù lệch với server) lúc khóa bài; chỉ để giáo viên tham khảo. */
+  sealedAt: string;
+  offlineSeconds: number;
 }
 
 export interface SubmitResult {
@@ -98,7 +107,11 @@ export interface ResultRow {
   submissionId: string | null;
   submissionStatus: SubmissionStatus | null;
   submittedAt: string | null;
-  submitReason: 'student' | 'timeout' | null;
+  submitReason: 'student' | 'timeout' | 'offline' | null;
+  /** Chỉ có với bài nộp ngoại tuyến: lúc server nhận, thời gian mất mạng (máy báo), số giây gửi trễ sau giờ hết hạn. */
+  offlineSyncedAt?: string | null;
+  offlineSeconds?: number | null;
+  offlineLateSeconds?: number | null;
   score: number | null;
   maxScore: number | null;
 }

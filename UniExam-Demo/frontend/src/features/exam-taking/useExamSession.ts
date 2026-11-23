@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { sessionApi } from '../../entities/submission/api';
-import type { SavedAnswer, SessionPayload, SubmitResult } from '../../entities/submission/types';
+import type { SavedAnswer, SessionPayload } from '../../entities/submission/types';
 import { Autosaver, clearPersistedPatches, loadPersistedPatches, type SaveStatus } from './autosave';
+import { readSealed, sendSealed, writeSealed, type SealedRecord } from './offlineSubmission';
 import { ApiError } from '../../shared/api';
+
+const SEALED_RETRY_MS = 10_000;
 
 const EMPTY: SavedAnswer = { selectedOptionIds: [], flagged: false };
 
@@ -70,6 +73,22 @@ export function useExamSession(sessionId: string) {
   const [offline, setOffline] = useState(false);
   /** serverTime - Date.now() tại lúc tải: bù lệch đồng hồ giữa máy sinh viên và server. */
   const [offsetMs, setOffsetMs] = useState(0);
+  /** Bài đã khóa trên máy vì nộp/hết giờ lúc mất mạng; tự gửi lên khi có mạng lại. */
+  const [sealed, setSealed] = useState<SealedRecord | null>(null);
+  const [sending, setSending] = useState(false);
+  // Bản mới nhất cho các callback chạy ngoài vòng render (hết giờ, nộp bài).
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
+  const payloadRef = useRef(payload);
+  payloadRef.current = payload;
+  const offsetRef = useRef(offsetMs);
+  offsetRef.current = offsetMs;
+  const offlineRef = useRef(offline);
+  offlineRef.current = offline;
+  const sealedRef = useRef(sealed);
+  sealedRef.current = sealed;
+  /** Date.now() lúc phát hiện mất kết nối, để báo giáo viên bài đã làm offline bao lâu. */
+  const offlineSince = useRef<number | null>(null);
   const activeSession = useRef(sessionId);
   activeSession.current = sessionId;
   const mounted = useRef(false);
@@ -97,6 +116,7 @@ export function useExamSession(sessionId: string) {
     // Cleanup cũng vô hiệu hóa request cũ của StrictMode dù sessionId không đổi.
     if (!mounted.current || generation !== loadGeneration.current || activeSession.current !== sessionId) return data;
     setOffline(fromCache);
+    if (fromCache) offlineSince.current ??= Date.now();
     setPayload(data);
     if (data.session.status === 'in_progress') {
       if (!fromCache) saveRoom(sessionId, data);
@@ -150,6 +170,8 @@ export function useExamSession(sessionId: string) {
     setExpired(false);
     setExpiryError(undefined);
     setOffline(false);
+    setSealed(readSealed(sessionId));
+    offlineSince.current = null;
     load()
       .catch((e: unknown) => !cancelled && setError(e instanceof Error ? e : new Error(String(e))))
       .finally(() => !cancelled && setLoading(false));
@@ -158,7 +180,13 @@ export function useExamSession(sessionId: string) {
       mounted.current = false;
       loadGeneration.current += 1;
     };
-  }, [load]);
+  }, [load, sessionId]);
+
+  // Theo dõi lúc bắt đầu mất kết nối (tự lưu lỗi hoặc đang dùng bản sao đề).
+  useEffect(() => {
+    if (saveStatus === 'error' || offline) offlineSince.current ??= Date.now();
+    else if (saveStatus === 'saved') offlineSince.current = null;
+  }, [saveStatus, offline]);
 
   // Có mạng trở lại: gửi ngay các đáp án đang chờ và tải lại đề từ server nếu đang dùng bản sao.
   useEffect(() => {
@@ -203,19 +231,97 @@ export function useExamSession(sessionId: string) {
   const fillBlank = useCallback((questionId: string, text: string) => update(questionId, { selectedOptionIds: text ? [text] : [] }), [update]);
   const toggleFlag = useCallback((questionId: string) => update(questionId, { flagged: !answerOf(questionId).flagged }), [answerOf, update]);
 
-  /** Lưu nốt đáp án còn chờ rồi nộp. Ném lỗi nếu chưa lưu hết để sinh viên thử lại thay vì mất đáp án. */
-  const submit = useCallback(async (): Promise<SubmitResult> => {
-    const saved = await saver.current?.flush();
-    if (!saved) throw new Error('Chưa lưu được đáp án mới nhất. Hãy kiểm tra kết nối mạng rồi thử nộp lại.');
-    const result = await sessionApi.submit(sessionId);
-    await load();
-    return result;
-  }, [saver, sessionId, load]);
+  /**
+   * Khóa toàn bộ bài làm trên máy (không sửa được nữa) để gửi lên khi có mạng.
+   * Dùng khi bấm Nộp hoặc hết giờ mà chưa gửi được lên server.
+   */
+  const seal = useCallback((): boolean => {
+    if (sealedRef.current) return true;
+    const data = payloadRef.current;
+    if (!data || data.session.status !== 'in_progress') return false;
+    const now = Date.now();
+    const current = answersRef.current;
+    const record: SealedRecord = {
+      examTitle: data.exam.title,
+      answers: data.questions
+        .filter((q) => current[q.id])
+        .map((q) => ({
+          questionId: q.id,
+          selectedOptionIds: current[q.id].selectedOptionIds.filter((value) => value.trim().length > 0),
+          flagged: current[q.id].flagged
+        })),
+      sealedAt: new Date(now + offsetRef.current).toISOString(),
+      offlineSeconds: offlineSince.current === null ? 0 : Math.max(0, Math.round((now - offlineSince.current) / 1000))
+    };
+    writeSealed(sessionId, record);
+    // Ngừng tự lưu từng câu: bài đầy đủ sẽ được gửi một lần.
+    saver.current?.dispose();
+    sealedRef.current = record;
+    setSealed(record);
+    return true;
+  }, [sessionId]);
+
+  /**
+   * Lưu nốt đáp án còn chờ rồi nộp. Không gửi được (mất mạng, server không trả lời) thì khóa bài trên máy
+   * và tự gửi khi có mạng lại, nên sinh viên vẫn nộp được và không mất đáp án.
+   */
+  const submit = useCallback(async (): Promise<'submitted' | 'sealed'> => {
+    let saved = false;
+    try {
+      saved = !!(await saver.current?.flush());
+    } catch {
+      saved = false;
+    }
+    if (saved) {
+      try {
+        await sessionApi.submit(sessionId);
+        await load();
+        return 'submitted';
+      } catch (err) {
+        if (!isConnectionError(err)) throw err;
+      }
+    }
+    if (!seal()) throw new Error('Không nộp được bài. Hãy kiểm tra kết nối mạng rồi thử lại.');
+    return 'sealed';
+  }, [saver, sessionId, load, seal]);
+
+  // Có bài đã khóa: gửi ngay, khi có mạng lại, và thử lại định kỳ cho tới khi server nhận.
+  useEffect(() => {
+    if (!sealed || sealed.failedMessage) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const attempt = async () => {
+      clearTimeout(timer);
+      setSending(true);
+      const result = await sendSealed(sessionId, sealedRef.current);
+      if (stopped) return;
+      setSending(false);
+      if (result === 'sent') {
+        sealedRef.current = null;
+        setSealed(null);
+        setExpired(false);
+        void load().catch(() => undefined);
+      } else if (result === 'failed') {
+        setSealed(readSealed(sessionId) ?? { ...sealed, failedMessage: 'Máy chủ không nhận bài nộp này. Hãy liên hệ giáo viên.' });
+      } else {
+        timer = setTimeout(() => void attempt(), SEALED_RETRY_MS);
+      }
+    };
+    void attempt();
+    const online = () => void attempt();
+    window.addEventListener('online', online);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      window.removeEventListener('online', online);
+      setSending(false);
+    };
+  }, [sealed, sessionId, load]);
 
   // Lock the UI at the deadline, even when the final server response is delayed.
   // Retry status checks because server time/network latency can differ slightly.
   useEffect(() => {
-    if (!expired || payload?.session.status !== 'in_progress') return;
+    if (!expired || sealed || payload?.session.status !== 'in_progress') return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const check = async () => {
@@ -234,13 +340,19 @@ export function useExamSession(sessionId: string) {
     };
     void check();
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [expired, payload?.session.status, load]);
+  }, [expired, sealed, payload?.session.status, load]);
 
-  /** Hết giờ: khóa ngay rồi kiểm tra trạng thái tự nộp của server. */
+  /**
+   * Hết giờ: khóa giao diện. Còn đáp án chưa gửi được hoặc đang mất kết nối thì khóa bài trên máy để gửi sau
+   * (server sẽ thay bài tự nộp bằng bài đầy đủ); ngược lại để server tự nộp như bình thường.
+   */
   const expire = useCallback(() => {
     setExpired(true);
+    if (sealedRef.current) return;
+    const unsent = !!saver.current?.hasPending || Object.keys(loadPersistedPatches(pendingKey(sessionId))).length > 0;
+    if ((offlineRef.current || unsent) && seal()) return;
     void saver.current?.flush().catch(() => undefined);
-  }, []);
+  }, [sessionId, seal]);
 
   const counts = useMemo(() => {
     const questions = payload?.questions ?? [];
@@ -249,5 +361,6 @@ export function useExamSession(sessionId: string) {
     return { total: questions.length, answered, unanswered: questions.length - answered, flagged };
   }, [payload, answers]);
 
-  return { payload, loading, error, expired, expiryError, offline, saveStatus, offsetMs, answerOf, select, fillBlank, clear, toggleFlag, submit, expire, counts };
+  return { payload, loading, error, expired, expiryError, offline, saveStatus, offsetMs, answerOf, select, fillBlank, clear, toggleFlag, submit, expire, counts,
+    sealed, sending };
 }

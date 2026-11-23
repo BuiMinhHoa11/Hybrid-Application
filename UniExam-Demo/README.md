@@ -89,6 +89,14 @@ Database chỉ lưu bản băm Argon2 của mật khẩu, không xem lại đư�
 
 Migration `0003_fullscreen_events` tạo bảng `exam_session_events`. Cần áp migration trước khi chạy backend mới; cấu hình local đã tự thực hiện khi khởi động private-api.
 
+### Cảnh báo trực tiếp cho quản trị viên
+
+Khi máy chủ ghi nhận một lần thoát toàn màn hình trong thời gian làm bài, hệ thống tạo cảnh báo và chuyển tới tài khoản quản trị đang đăng nhập, thường trong khoảng một giây sau khi sự kiện đến máy chủ. Mục **Cảnh báo** trên thanh điều hướng mở trang `/admin/exam-alerts`. Tab **Đang ngoài toàn màn hình** liệt kê tài khoản, họ tên, kỳ thi, thời điểm và số lần thoát; tài khoản tự rời danh sách khi máy chủ nhận sự kiện vào lại toàn màn hình hoặc bài thi đã nộp/hết giờ. Dữ liệu đồng bộ trễ được sắp theo thời điểm xảy ra sự kiện để không ghi đè trạng thái mới bằng sự kiện cũ. Có thể tìm theo tài khoản, họ tên hoặc kỳ thi và mở nhật ký. Tab **Lịch sử cảnh báo** giữ 50 lần thoát gần nhất, kèm trạng thái hiện tại và nút đánh dấu đã đọc. Trạng thái đã đọc lưu riêng cho từng quản trị viên và không làm thay đổi danh sách đang thoát. Thông báo nổi vẫn hiển thị khi đang ở trang khác.
+
+Migration `0005_admin_exam_alerts` tạo cảnh báo và biên nhận đã đọc; không phát lại nhật ký cũ thành cảnh báo mới. Cảnh báo và sự kiện được lưu trong cùng giao dịch, thử gửi lại cùng UUID không tạo trùng. Chỉ quản trị viên được nhận; giáo viên và sinh viên không được truy cập API cảnh báo. Luồng dùng SSE có xác thực Bearer, tự kết nối lại; gateway và Nginx trong repo đã tắt buffering cho đường dẫn `/api/admin/exam-alerts/stream`. Nếu triển khai thêm proxy bên ngoài, cấu hình đường dẫn này truyền streaming và tắt buffering ở đó.
+
+Quản trị viên cần mở website để thấy cảnh báo trực tiếp. Nếu máy thí sinh mất mạng, cảnh báo chỉ đến khi sự kiện được gửi thành công sau khi có mạng lại; thời điểm thoát và thời điểm máy chủ nhận được hiển thị riêng. Thao tác vào toàn màn hình hoặc thoát sau khi nộp/hết giờ không tạo cảnh báo này.
+
 ## Chạy local trên Windows
 
 ### Ảnh minh họa câu hỏi
