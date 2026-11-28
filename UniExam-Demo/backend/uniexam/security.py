@@ -34,6 +34,15 @@ def verify_password(value: str, hashed: str):
         return False
 
 
+def password_needs_rehash(hashed: str) -> bool:
+    # Hash bcrypt cũ hoặc Argon2 tạo với tham số nặng (trước khi giảm) -> băm lại sau khi đăng nhập đúng,
+    # để các lần đăng nhập sau nhanh hơn.
+    try:
+        return hashed.startswith(("$2a$", "$2b$", "$2y$")) or hasher.check_needs_rehash(hashed)
+    except Exception:
+        return False
+
+
 def issue_token(user):
     now = now_utc()
     return jwt.encode({"sub": str(user["id"]), "role": user["role"], "iat": now,

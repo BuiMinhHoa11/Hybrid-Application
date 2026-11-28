@@ -7,7 +7,9 @@ if url.startswith("postgres://"):
     url = "postgresql+psycopg://" + url[len("postgres://"):]
 elif url.startswith("postgresql://"):
     url = "postgresql+psycopg://" + url[len("postgresql://"):]
-engine = create_engine(url, pool_pre_ping=True, connect_args={"connect_timeout": 5})
+# Giữ sẵn nhiều kết nối hơn (mặc định chỉ 5): kết nối vượt pool bị đóng ngay sau khi dùng,
+# lần sau phải đăng nhập lại PostgreSQL (SCRAM) — rất tốn CPU trên VM private chạy QEMU.
+engine = create_engine(url, pool_pre_ping=True, pool_size=10, max_overflow=10, connect_args={"connect_timeout": 5})
 
 
 @event.listens_for(engine, "connect")

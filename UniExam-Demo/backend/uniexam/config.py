@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     grading_queue_name: str = "uniexam:grading"
     grading_queue_group: str = "grading-workers"
     grading_poll_seconds: float = Field(default=2, gt=0)
+    # Đối soát qua database (phòng khi Redis mất việc) — không cần chạy mỗi vòng; VM private rất chậm.
+    grading_reconcile_seconds: float = Field(default=60, gt=0)
     lifecycle_interval_seconds: float = Field(default=5, gt=0)
     lifecycle_enabled: bool = True
     # Email thông báo lịch thi (SMTP: Gmail, Amazon SES SMTP, Mailpit khi dev...)

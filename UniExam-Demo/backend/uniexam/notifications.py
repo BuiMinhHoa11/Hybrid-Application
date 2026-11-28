@@ -19,7 +19,8 @@ from .db import SessionLocal, one, run
 
 logger = logging.getLogger("uniexam.notifications")
 VN_TZ = timezone(timedelta(hours=7))  # Việt Nam không có giờ mùa hè
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 5
+RETRY_SECONDS = 20  # thử lại sau 20 s, 40 s, 60 s... (lần n chờ n × 20 s)
 BATCH_SIZE = 50
 
 
@@ -105,8 +106,37 @@ DUE_SQL = """SELECT n.id, n.attempts, n.exam_id, u.email, u.full_name, u.is_acti
   FOR UPDATE OF n SKIP LOCKED"""
 
 
+def _close(client) -> None:
+    if client is None:
+        return
+    try:
+        client.quit()
+    except Exception:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
+def _record_failure(db: Session, row: dict, exc: Exception) -> None:
+    attempts = row["attempts"] + 1
+    run(db, """UPDATE email_notifications
+        SET attempts = :attempts, last_error = :error,
+            status = CASE WHEN :attempts >= :max THEN 'failed' ELSE 'pending' END,
+            send_after = now() + CAST(:delay AS integer) * interval '1 second'
+        WHERE id = :id""",
+        id=row["id"], attempts=attempts, max=MAX_ATTEMPTS, delay=RETRY_SECONDS * attempts,
+        error=f"{type(exc).__name__}: {exc}"[:500])
+    logger.warning("Gửi email thất bại (lần %s/%s): %s", attempts, MAX_ATTEMPTS, type(exc).__name__)
+
+
 def send_due_batch() -> int:
-    """Gửi tối đa BATCH_SIZE email đã đến giờ. Dừng ngay khi SMTP lỗi để không dồn lỗi."""
+    """Gửi tối đa BATCH_SIZE email đã đến giờ.
+
+    - Một thư lỗi (SES ngắt vì chờ quá lâu, người nhận bị từ chối...) KHÔNG chặn các thư sau:
+      thư đó được hẹn gửi lại, kết nối SMTP có thể đã hỏng nên đóng đi và mở kết nối mới cho thư kế tiếp.
+    - Chỉ dừng cả lượt khi không kết nối/đăng nhập được SMTP (SES không truy cập được), thử lại ở lượt sau.
+    """
     sent = 0
     client = None
     try:
@@ -118,30 +148,25 @@ def send_due_batch() -> int:
                 if not row["email"] or not row["is_active"] or row["end_time"] <= now_utc():
                     run(db, "UPDATE email_notifications SET status = 'skipped' WHERE id = :id", id=row["id"])
                     continue
-                try:
-                    if client is None:
+                if client is None:
+                    try:
                         client = smtp_connect()
-                    elif settings.email_send_interval_seconds:
-                        time.sleep(settings.email_send_interval_seconds)
+                    except Exception as exc:
+                        _record_failure(db, row, exc)
+                        break
+                elif settings.email_send_interval_seconds:
+                    time.sleep(settings.email_send_interval_seconds)
+                try:
                     client.send_message(build_schedule_message(row))
                 except Exception as exc:
-                    attempts = row["attempts"] + 1
-                    run(db, """UPDATE email_notifications
-                        SET attempts = :attempts, last_error = :error,
-                            status = CASE WHEN :attempts >= :max THEN 'failed' ELSE 'pending' END,
-                            send_after = now() + CAST(:attempts AS integer) * interval '1 minute'
-                        WHERE id = :id""",
-                        id=row["id"], attempts=attempts, max=MAX_ATTEMPTS, error=f"{type(exc).__name__}: {exc}"[:500])
-                    logger.warning("Gửi email thất bại (lần %s): %s", attempts, type(exc).__name__)
-                    break
+                    _record_failure(db, row, exc)
+                    _close(client)
+                    client = None
+                    continue
                 run(db, """UPDATE email_notifications
                     SET status = 'sent', sent_at = now(), attempts = attempts + 1, last_error = NULL
                     WHERE id = :id""", id=row["id"])
                 sent += 1
     finally:
-        if client is not None:
-            try:
-                client.quit()
-            except Exception:
-                pass
+        _close(client)
     return sent

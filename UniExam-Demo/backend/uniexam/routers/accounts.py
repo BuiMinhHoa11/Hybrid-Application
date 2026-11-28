@@ -11,7 +11,7 @@ from ..common import Schema, dto, now_utc
 from ..config import settings
 from ..db import get_db, one, many, run
 from ..errors import AppError
-from ..security import current_user, admin_user, hash_password, verify_password, dummy_hash, issue_token
+from ..security import current_user, admin_user, hash_password, verify_password, dummy_hash, issue_token, password_needs_rehash
 
 router = APIRouter()
 Role = Literal["student", "teacher", "admin"]
@@ -46,6 +46,8 @@ def login(body: Login, db: Session = Depends(get_db, scope="function")):
         raise AppError(401, "Sai tên đăng nhập hoặc mật khẩu", "UNAUTHORIZED")
     if not user["is_active"]:
         raise AppError(403, "Tài khoản đã bị khóa, vui lòng liên hệ quản trị viên", "FORBIDDEN")
+    if password_needs_rehash(user["password_hash"]):
+        run(db, "UPDATE users SET password_hash = :hash WHERE id = :id", hash=hash_password(body.password), id=user["id"])
     return {"token": issue_token(user), "user": dto({k: user[k] for k in ("id", "username", "full_name", "role")})}
 
 

@@ -57,6 +57,7 @@ def polling_loop(stop: threading.Event):
     except Exception:
         logger.exception("Redis queue unavailable at worker startup")
     with httpx.Client(base_url=settings.private_api_url.rstrip("/"), headers={"X-Internal-Api-Key": settings.internal_api_key}, timeout=10) as api:
+        last_reconcile = float("-inf")
         while not stop.is_set():
             try:
                 # Thời gian chờ Redis phải NGẮN hơn socket_timeout (5s) của client Redis,
@@ -68,8 +69,12 @@ def polling_loop(stop: threading.Event):
                         acknowledge(entry_id)
                     delay = settings.grading_poll_seconds
                     continue
-                # Reconciliation handles jobs published while Redis was unavailable.
-                process_claim(api)
+                # Đối soát: nhận bài còn chờ chấm mà Redis không báo (vd. lúc Redis gián đoạn).
+                # Chỉ chạy mỗi GRADING_RECONCILE_SECONDS (mặc định 60 s) thay vì mỗi vòng, để worker
+                # không gọi private-api và PostgreSQL liên tục khi đang rảnh.
+                if time.monotonic() - last_reconcile >= settings.grading_reconcile_seconds:
+                    last_reconcile = time.monotonic()
+                    process_claim(api)
                 delay = settings.grading_poll_seconds
             except Exception as error:
                 state["redis_failures"] += 1
@@ -95,7 +100,8 @@ health_app = FastAPI(title="UniExam Python grading worker", lifespan=lifespan)
 @health_app.get("/health")
 def health():
     last = state["last_contact"]
-    api_healthy = last is not None and time.monotonic() - last < max(60, 5 * settings.grading_poll_seconds)
+    # Worker chỉ gọi private-api khi có bài hoặc mỗi lần đối soát, nên cho phép tới 3 chu kỳ đối soát không liên lạc.
+    api_healthy = last is not None and time.monotonic() - last < max(60, 5 * settings.grading_poll_seconds, 3 * settings.grading_reconcile_seconds)
     queue_healthy = redis_health()
     ok = api_healthy and queue_healthy
     return JSONResponse({"status": "ok" if ok else "degraded", "service": "grading-worker", "graded": state["graded"], "failed": state["failed"], "checks": {"private-api": "ok" if api_healthy else "unreachable", "redis": "ok" if queue_healthy else "unreachable"}}, status_code=200 if ok else 503)
